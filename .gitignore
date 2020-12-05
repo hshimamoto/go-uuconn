@@ -1,0 +1,6 @@
+.*
+!.gitignore
+
+# binary
+/uuconn
+/uuconn.exe
