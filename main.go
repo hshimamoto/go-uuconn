@@ -125,25 +125,31 @@ func (u *UDPconn)Connection() {
     ulptr := 0
     ulack := 0
     ulseq := 0
+    ackseq := 0
+    ackflag := false
     buflen := len(ulbuf)
     dlseq := 0
-    q := make(chan bool)
+    q := make(chan bool, 32)
+    ackq := make(chan bool, 32)
     ticker := time.NewTicker(time.Second)
     //
     for u.running {
-	if ulptr < buflen {
+	offset := 0
+	for ulptr < buflen {
 	    datalen := buflen
 	    if datalen > 10 {
 		datalen = 10
 	    }
 	    msglen := 1 + 2 + 2 + datalen
+	    seq := ulseq + offset
 	    buf := make([]byte, msglen)
 	    buf[0] = 0x44 // Data
-	    binary.LittleEndian.PutUint16(buf[1:], uint16(ulseq))
-	    binary.LittleEndian.PutUint16(buf[3:], uint16(ulseq + datalen))
+	    binary.LittleEndian.PutUint16(buf[1:], uint16(seq))
+	    binary.LittleEndian.PutUint16(buf[3:], uint16(seq + datalen))
 	    copy(buf[5:], ulbuf)
 	    u.queue <- buf
 	    ulptr += datalen
+	    offset += datalen
 	}
 	select {
 	case msg := <-u.mq:
@@ -152,12 +158,11 @@ func (u *UDPconn)Connection() {
 		if msg.seq0 == dlseq {
 		    log.Printf("Data seq %d-%d\n", msg.seq0, msg.seq1)
 		    dlseq = msg.seq1
-		    // ack!
-		    buf := make([]byte, 5)
-		    buf[0] = 0x41
-		    binary.LittleEndian.PutUint16(buf[1:], uint16(dlseq))
-		    binary.LittleEndian.PutUint16(buf[3:], uint16(dlseq)) // dummy
-		    u.queue <- buf
+		    ackseq = msg.seq1
+		    if ackflag == false {
+			ackq <-true
+			ackflag = true
+		    }
 		}
 	    }
 	    if msg.mtype == 0x41 {
@@ -167,7 +172,18 @@ func (u *UDPconn)Connection() {
 	    }
 	case <-ticker.C:
 	    // rewind
-	    ulptr = ulack
+	    if ulptr != ulack {
+		log.Printf("rewind %d->%d\n", ulptr, ulack)
+		ulptr = ulack
+	    }
+	case <-ackq:
+	    // ack!
+	    buf := make([]byte, 5)
+	    buf[0] = 0x41
+	    binary.LittleEndian.PutUint16(buf[1:], uint16(ackseq))
+	    binary.LittleEndian.PutUint16(buf[3:], uint16(ackseq)) // dummy
+	    u.queue <- buf
+	    ackflag = false
 	case <-q:
 	    // ignore
 	}
