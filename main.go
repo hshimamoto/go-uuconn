@@ -51,6 +51,7 @@ type UDPconn struct {
     connected bool
     queue chan []byte
     mq chan *Message
+    sendq chan []byte
     stream *Stream
 }
 
@@ -72,6 +73,7 @@ func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
     u.conn = conn
     u.queue = make(chan []byte, 32)
     u.mq = make(chan *Message, 32)
+    u.sendq = make(chan []byte, 32)
     //
     u.stream = NewStream(65536)
     return u, err
@@ -128,15 +130,26 @@ func (u *UDPconn)Connection() {
     ackseq := 0
     ackflag := false
     buflen := len(ulbuf)
+    lastseq := buflen
     dlseq := 0
     q := make(chan bool, 32)
     ackq := make(chan bool, 32)
     ticker := time.NewTicker(time.Second)
     //
     for u.running {
+	if ulack == buflen {
+	    select {
+	    case next := <-u.sendq:
+		ulbuf = next
+		buflen = len(ulbuf)
+		ulptr = 0
+		lastseq = ulseq + buflen
+	    default:
+	    }
+	}
 	offset := 0
 	for ulptr < buflen {
-	    datalen := buflen
+	    datalen := buflen - ulptr
 	    if datalen > 10 {
 		datalen = 10
 	    }
@@ -173,9 +186,9 @@ func (u *UDPconn)Connection() {
 	    }
 	case <-ticker.C:
 	    // rewind
-	    if ulptr != ulack {
-		log.Printf("rewind %d->%d\n", ulptr, ulack)
-		ulptr = ulack
+	    if ulseq != lastseq {
+		log.Printf("rewind %d->%d (%d)\n", ulptr, ulseq, lastseq)
+		ulptr = ulseq
 	    }
 	    ticker.Reset(time.Second)
 	case <-ackq:
