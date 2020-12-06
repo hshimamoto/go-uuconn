@@ -132,26 +132,13 @@ func check(laddr, raddr string) {
 }
 
 func server(laddr, raddr, caddr string) {
-    addr, err := net.ResolveUDPAddr("udp", laddr)
+    u, err := NewUDPConn(laddr, raddr)
     if err != nil {
-	log.Printf("ResolveUDPAddr: %v\n", err)
+	log.Printf("NewUDPConn: %v\n", err)
 	return
     }
-    conn, err := net.ListenUDP("udp", addr)
-    if err != nil {
-	log.Printf("ListenUDP: %v\n", err)
-	return
-    }
-    go func() {
-	buf := make([]byte, 1500)
-	for {
-	    n, _, _ := conn.ReadFromUDP(buf)
-	    log.Printf("recv %s\n", string(buf[:n]))
-	}
-    }()
-    addr, err = net.ResolveUDPAddr("udp", raddr)
-    for {
-	conn.WriteToUDP([]byte("Probe"), addr)
+    u.Connect()
+    for u.running {
 	time.Sleep(time.Second)
     }
 }
