@@ -14,6 +14,9 @@ import (
 type UDPconn struct {
     addr *net.UDPAddr
     conn *net.UDPConn
+    running bool
+    connected bool
+    queue chan []byte
 }
 
 func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
@@ -32,30 +35,53 @@ func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
 	return nil, err
     }
     u.conn = conn
+    u.queue = make(chan []byte, 32)
     return u, err
 }
 
-func (u *UDPconn)Connect(remote string) {
-    conn, err := net.ListenUDP("udp", u.addr)
-    if err != nil {
-	log.Printf("failed to listen %s\n", u.addr)
-	return
-    }
-    // start receiver
-    found := false
-    go func() {
-	buf := make([]byte, 1500)
-	for {
+func (u *UDPconn)Receiver() {
+    conn := u.conn
+    buf := make([]byte, 1500)
+    for u.running {
 	    n, addr, err := conn.ReadFromUDP(buf)
 	    if err != nil {
 		log.Printf("Read: %v\n", err)
 		continue
 	    }
+	    if addr.String() != u.addr.String() {
+		continue
+	    }
+	    if u.connected == false {
+		log.Printf("connected with %v\n", addr)
+		u.connected = true
+		continue
+	    }
 	    log.Printf("%d bytes from %v\n", n, addr)
-	    found = true
+    }
+}
+
+func (u *UDPconn)Sender() {
+    ticker := time.NewTicker(time.Second)
+    for u.running {
+	select {
+	case <-ticker.C:
+	    u.conn.WriteToUDP([]byte("Probe"), u.addr)
 	}
-    }()
-    u.conn = conn
+    }
+}
+
+func (u *UDPconn)Connect() {
+    // start receiver
+    u.running = true
+    u.connected = false
+    go u.Receiver()
+    // connect
+    for u.connected == false {
+	u.conn.WriteToUDP([]byte("Probe"), u.addr)
+	time.Sleep(100 * time.Millisecond)
+    }
+    // start sender
+    go u.Sender()
 }
 
 func checker(laddr string) {
@@ -131,26 +157,13 @@ func server(laddr, raddr, caddr string) {
 }
 
 func client(laddr, raddr, listen string) {
-    addr, err := net.ResolveUDPAddr("udp", laddr)
+    u, err := NewUDPConn(laddr, raddr)
     if err != nil {
-	log.Printf("ResolveUDPAddr: %v\n", err)
+	log.Printf("NewUDPConn: %v\n", err)
 	return
     }
-    conn, err := net.ListenUDP("udp", addr)
-    if err != nil {
-	log.Printf("ListenUDP: %v\n", err)
-	return
-    }
-    go func() {
-	buf := make([]byte, 1500)
-	for {
-	    n, _, _ := conn.ReadFromUDP(buf)
-	    log.Printf("recv %s\n", string(buf[:n]))
-	}
-    }()
-    addr, err = net.ResolveUDPAddr("udp", raddr)
-    for {
-	conn.WriteToUDP([]byte("Probe"), addr)
+    u.Connect()
+    for u.running {
 	time.Sleep(time.Second)
     }
 }
