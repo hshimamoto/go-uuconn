@@ -121,7 +121,7 @@ func (u *UDPconn)Sender() {
 
 func (u *UDPconn)Connection() {
     // uplink buffer
-    ulbuf := []byte("TEST MESSAGE")
+    ulbuf := []byte("TEST MESSAGE TEST MESSAGE TEST MESSAGE TEST MESSAGE")
     ulptr := 0
     ulack := 0
     ulseq := 0
@@ -132,14 +132,18 @@ func (u *UDPconn)Connection() {
     //
     for u.running {
 	if ulptr < buflen {
-	    msglen := 1 + 2 + 2 + buflen
+	    datalen := buflen
+	    if datalen > 10 {
+		datalen = 10
+	    }
+	    msglen := 1 + 2 + 2 + datalen
 	    buf := make([]byte, msglen)
 	    buf[0] = 0x44 // Data
 	    binary.LittleEndian.PutUint16(buf[1:], uint16(ulseq))
-	    binary.LittleEndian.PutUint16(buf[3:], uint16(ulseq + buflen))
+	    binary.LittleEndian.PutUint16(buf[3:], uint16(ulseq + datalen))
 	    copy(buf[5:], ulbuf)
 	    u.queue <- buf
-	    ulptr += buflen
+	    ulptr += datalen
 	}
 	select {
 	case msg := <-u.mq:
@@ -159,6 +163,7 @@ func (u *UDPconn)Connection() {
 	    if msg.mtype == 0x41 {
 		log.Printf("ack %d\n", msg.seq0)
 		ulack = msg.seq0
+		ulseq = ulack
 	    }
 	case <-ticker.C:
 	    // rewind
