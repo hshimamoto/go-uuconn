@@ -2,6 +2,7 @@
 // vim: set sw=4 sts=4:
 package main
 import (
+    "encoding/binary"
     "fmt"
     "log"
     "net"
@@ -11,12 +12,46 @@ import (
     "github.com/hshimamoto/go-session"
 )
 
+type StreamBuffer struct {
+    buf []byte
+    sz int
+    rptr, wptr int
+}
+
+func NewStreamBuffer(sz int) *StreamBuffer {
+    b := &StreamBuffer{}
+    b.buf = make([]byte, sz)
+    b.sz = sz
+    b.rptr = 0
+    b.wptr = 0
+    return b
+}
+
+type Stream struct {
+    in, out *StreamBuffer
+}
+
+func NewStream(sz int) *Stream {
+    s := &Stream{}
+    s.in = NewStreamBuffer(sz)
+    s.out = NewStreamBuffer(sz)
+    return s
+}
+
+type Message struct {
+    mtype int
+    seq0, seq1 int
+    data []byte
+}
+
 type UDPconn struct {
     addr *net.UDPAddr
     conn *net.UDPConn
     running bool
     connected bool
     queue chan []byte
+    mq chan *Message
+    stream *Stream
 }
 
 func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
@@ -36,6 +71,9 @@ func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
     }
     u.conn = conn
     u.queue = make(chan []byte, 32)
+    u.mq = make(chan *Message, 32)
+    //
+    u.stream = NewStream(65536)
     return u, err
 }
 
@@ -43,20 +81,29 @@ func (u *UDPconn)Receiver() {
     conn := u.conn
     buf := make([]byte, 1500)
     for u.running {
-	    n, addr, err := conn.ReadFromUDP(buf)
-	    if err != nil {
-		log.Printf("Read: %v\n", err)
-		continue
-	    }
-	    if addr.String() != u.addr.String() {
-		continue
-	    }
-	    if u.connected == false {
-		log.Printf("connected with %v\n", addr)
-		u.connected = true
-		continue
-	    }
-	    log.Printf("%d bytes from %v\n", n, addr)
+	n, addr, err := conn.ReadFromUDP(buf)
+	if err != nil {
+	    log.Printf("Read: %v\n", err)
+	    continue
+	}
+	if addr.String() != u.addr.String() {
+	    continue
+	}
+	if u.connected == false {
+	    log.Printf("connected with %v\n", addr)
+	    u.connected = true
+	    continue
+	}
+	log.Printf("%d bytes from %v\n", n, addr)
+	// parse
+	msg := &Message{}
+	msg.mtype = int(buf[0])
+	msg.seq0 = int(binary.LittleEndian.Uint16(buf[1:]))
+	msg.seq1 = int(binary.LittleEndian.Uint16(buf[3:]))
+	msg.data = buf[5:]
+	if msg.mtype == 0x41 || msg.mtype == 0x44 {
+	    u.mq <- msg
+	}
     }
 }
 
@@ -68,6 +115,52 @@ func (u *UDPconn)Sender() {
 	    u.conn.WriteToUDP(buf, u.addr)
 	case <-ticker.C:
 	    u.conn.WriteToUDP([]byte("Probe"), u.addr)
+	}
+    }
+}
+
+func (u *UDPconn)Connection() {
+    // uplink buffer
+    ulbuf := []byte("TEST MESSAGE")
+    ulptr := 0
+    ulack := 0
+    ulseq := 0
+    buflen := len(ulbuf)
+    dlseq := 0
+    q := make(chan bool)
+    ticker := time.NewTicker(time.Second)
+    //
+    for u.running {
+	if ulptr < buflen {
+	    msglen := 1 + 2 + 2 + buflen
+	    buf := make([]byte, msglen)
+	    buf[0] = 0x44 // Data
+	    binary.LittleEndian.PutUint16(buf[1:], uint16(ulseq))
+	    binary.LittleEndian.PutUint16(buf[3:], uint16(ulseq + buflen))
+	    copy(buf[5:], ulbuf)
+	    u.queue <- buf
+	    ulptr += buflen
+	}
+	select {
+	case msg := <-u.mq:
+	    log.Printf("dequeue message type: %d\n", msg.mtype)
+	    if msg.mtype == 0x44 {
+		if msg.seq0 == dlseq {
+		    log.Printf("Data seq %d-%d\n", msg.seq0, msg.seq1)
+		    dlseq = msg.seq1
+		    // ack!
+		    buf := make([]byte, 5)
+		    buf[0] = 0x41
+		    binary.LittleEndian.PutUint16(buf[1:], uint16(dlseq))
+		    binary.LittleEndian.PutUint16(buf[3:], uint16(dlseq)) // dummy
+		    u.queue <- buf
+		}
+	    }
+	case <-ticker.C:
+	    // rewind
+	    ulptr = ulack
+	case <-q:
+	    // ignore
 	}
     }
 }
@@ -89,6 +182,8 @@ func (u *UDPconn)Connect() {
     }
     // start sender
     go u.Sender()
+    // start connection
+    go u.Connection()
 }
 
 func checker(laddr string) {
