@@ -156,6 +156,10 @@ func (u *UDPconn)Connection() {
 		    u.queue <- buf
 		}
 	    }
+	    if msg.mtype == 0x41 {
+		log.Printf("ack %d\n", msg.seq0)
+		ulack = msg.seq0
+	    }
 	case <-ticker.C:
 	    // rewind
 	    ulptr = ulack
