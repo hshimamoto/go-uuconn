@@ -61,9 +61,11 @@ func (u *UDPconn)Receiver() {
 }
 
 func (u *UDPconn)Sender() {
-    ticker := time.NewTicker(time.Second)
+    ticker := time.NewTicker(10 * time.Second)
     for u.running {
 	select {
+	case buf := <-u.queue:
+	    u.conn.WriteToUDP(buf, u.addr)
 	case <-ticker.C:
 	    u.conn.WriteToUDP([]byte("Probe"), u.addr)
 	}
@@ -76,9 +78,14 @@ func (u *UDPconn)Connect() {
     u.connected = false
     go u.Receiver()
     // connect
+    cnt := 0
     for u.connected == false {
 	u.conn.WriteToUDP([]byte("Probe"), u.addr)
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
+	cnt++
+	if cnt % 10 == 0 {
+	    time.Sleep(time.Second)
+	}
     }
     // start sender
     go u.Sender()
