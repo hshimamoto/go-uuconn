@@ -150,6 +150,7 @@ func (u *UDPconn)Connection() {
 	    u.queue <- buf
 	    ulptr += datalen
 	    offset += datalen
+	    ticker.Reset(100 * time.Millisecond)
 	}
 	select {
 	case msg := <-u.mq:
@@ -176,6 +177,7 @@ func (u *UDPconn)Connection() {
 		log.Printf("rewind %d->%d\n", ulptr, ulack)
 		ulptr = ulack
 	    }
+	    ticker.Reset(time.Second)
 	case <-ackq:
 	    // ack!
 	    buf := make([]byte, 5)
