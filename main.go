@@ -76,7 +76,7 @@ func checker(laddr string) {
 	    log.Printf("ReadFromUDP: %v\n", err)
 	    continue
 	}
-	resp := fmt.Sprintf("Probe:%v", addr)
+	resp := fmt.Sprintf("Probe %v", addr)
 	conn.WriteToUDP([]byte(resp), addr)
 	conn.WriteToUDP([]byte(resp), addr)
 	conn.WriteToUDP([]byte(resp), addr)
@@ -102,7 +102,7 @@ func check(laddr, raddr string) {
     conn.WriteToUDP([]byte("Probe"), addr)
     buf := make([]byte, 1500)
     n, _, _ := conn.ReadFromUDP(buf)
-    log.Printf("%s\n", string(buf[:n]))
+    log.Printf("Remote %s\n", string(buf[:n]))
 }
 
 func server(laddr, raddr, caddr string) {
