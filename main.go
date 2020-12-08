@@ -166,7 +166,7 @@ func (u *UDPconn)Connection() {
 		ulbuf = next
 		buflen = len(ulbuf)
 		ulptr = ulseq
-		lastseq = ulseq + buflen
+		lastseq = (ulseq + buflen) % 65536
 		log.Printf("dequeue send message %d bytes lastseq=%d\n", buflen, lastseq)
 	    default:
 	    }
@@ -326,6 +326,9 @@ func client(laddr, raddr, listen string) {
 	msg := fmt.Sprintf("feed new message at %v\n", time.Now())
 	for dummy := 0; dummy < 100; dummy++ {
 	    msg += "DUMMYDUMMY"
+	    msg += "dummydummy"
+	    msg += "DUMMYDUMMY"
+	    msg += "dummydummy"
 	}
 	u.sendq <- []byte(msg)
     }
