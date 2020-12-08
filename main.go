@@ -138,7 +138,7 @@ func (u *UDPconn)Connection() {
     q := make(chan bool, 32)
     ackq := make(chan bool, 32)
     ticker := time.NewTicker(time.Second)
-    mss := 50
+    mss := 200
     //
     for u.running {
 	if ulack == lastseq {
@@ -299,7 +299,10 @@ func client(laddr, raddr, listen string) {
     u.Connect()
     for u.running {
 	time.Sleep(5 * time.Second)
-	msg := fmt.Sprintf("feed new message at %v", time.Now())
+	msg := fmt.Sprintf("feed new message at %v\n", time.Now())
+	for dummy := 0; dummy < 100; dummy++ {
+	    msg += "DUMMYDUMMY"
+	}
 	u.sendq <- []byte(msg)
     }
 }
