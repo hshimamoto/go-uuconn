@@ -40,8 +40,21 @@ func NewStream(sz int) *Stream {
 
 type Message struct {
     mtype int
+    sid int
     seq0, seq1 int
     data []byte
+}
+
+func (m *Message)Pack() []byte {
+    datalen := len(m.data)
+    msglen := 1 + 1 + 2 + 2 + datalen
+    buf := make([]byte, msglen)
+    buf[0] = byte(m.mtype)
+    buf[1] = byte(m.sid)
+    binary.LittleEndian.PutUint16(buf[2:], uint16(m.seq0))
+    binary.LittleEndian.PutUint16(buf[4:], uint16(m.seq1))
+    copy(buf[6:], m.data)
+    return buf
 }
 
 type UDPconn struct {
@@ -103,9 +116,10 @@ func (u *UDPconn)Receiver() {
 	// parse
 	msg := &Message{}
 	msg.mtype = int(buf[0])
-	msg.seq0 = int(binary.LittleEndian.Uint16(buf[1:]))
-	msg.seq1 = int(binary.LittleEndian.Uint16(buf[3:]))
-	msg.data = buf[5:n]
+	msg.sid = int(buf[1])
+	msg.seq0 = int(binary.LittleEndian.Uint16(buf[2:]))
+	msg.seq1 = int(binary.LittleEndian.Uint16(buf[4:]))
+	msg.data = buf[6:n]
 	if msg.mtype == 0x41 || msg.mtype == 0x44 {
 	    u.mq <- msg
 	}
@@ -158,15 +172,17 @@ func (u *UDPconn)Connection() {
 	    if datalen > mss {
 		datalen = mss
 	    }
-	    msglen := 1 + 2 + 2 + datalen
-	    seq := ulseq + offset
-	    buf := make([]byte, msglen)
-	    buf[0] = 0x44 // Data
-	    binary.LittleEndian.PutUint16(buf[1:], uint16(seq))
-	    binary.LittleEndian.PutUint16(buf[3:], uint16(seq + datalen))
-	    copy(buf[5:], ulbuf)
+	    seq0 := (ulseq + offset) % 65536
+	    seq1 := (ulseq + offset + datalen) % 65536
+	    msg := &Message{
+		mtype: 0x44,
+		sid: 0,
+		seq0: seq0,
+		seq1: seq1,
+	    }
+	    buf := msg.Pack()
 	    u.queue <- buf
-	    ulptr = (ulptr + datalen) % 65536
+	    ulptr = seq1
 	    offset += datalen
 	    ticker.Reset(100 * time.Millisecond)
 	}
@@ -198,10 +214,13 @@ func (u *UDPconn)Connection() {
 	    ticker.Reset(time.Second)
 	case <-ackq:
 	    // ack!
-	    buf := make([]byte, 5)
-	    buf[0] = 0x41
-	    binary.LittleEndian.PutUint16(buf[1:], uint16(ackseq))
-	    binary.LittleEndian.PutUint16(buf[3:], uint16(ackseq)) // dummy
+	    msg := &Message {
+		mtype: 0x41,
+		sid: 0,
+		seq0: ackseq,
+		seq1: ackseq,
+	    }
+	    buf := msg.Pack()
 	    u.queue <- buf
 	    ackflag = false
 	case <-q:
