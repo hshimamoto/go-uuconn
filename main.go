@@ -57,6 +57,16 @@ func (m *Message)Pack() []byte {
     return buf
 }
 
+func ParseMessage(buf []byte) *Message {
+    msg := &Message{}
+    msg.mtype = int(buf[0])
+    msg.sid = int(buf[1])
+    msg.seq0 = int(binary.LittleEndian.Uint16(buf[2:]))
+    msg.seq1 = int(binary.LittleEndian.Uint16(buf[4:]))
+    msg.data = buf[6:]
+    return msg
+}
+
 type UDPconn struct {
     addr *net.UDPAddr
     conn *net.UDPConn
@@ -114,12 +124,7 @@ func (u *UDPconn)Receiver() {
 	    continue
 	}
 	// parse
-	msg := &Message{}
-	msg.mtype = int(buf[0])
-	msg.sid = int(buf[1])
-	msg.seq0 = int(binary.LittleEndian.Uint16(buf[2:]))
-	msg.seq1 = int(binary.LittleEndian.Uint16(buf[4:]))
-	msg.data = buf[6:n]
+	msg := ParseMessage(buf[:n])
 	if msg.mtype == 0x41 || msg.mtype == 0x44 {
 	    u.mq <- msg
 	}
