@@ -96,13 +96,16 @@ func (u *UDPconn)Receiver() {
 	    u.connected = true
 	    continue
 	}
-	log.Printf("%d bytes from %v\n", n, addr)
+	//log.Printf("%d bytes from %v\n", n, addr)
+	if buf[0] == 0x50 { // 'P'robe
+	    continue
+	}
 	// parse
 	msg := &Message{}
 	msg.mtype = int(buf[0])
 	msg.seq0 = int(binary.LittleEndian.Uint16(buf[1:]))
 	msg.seq1 = int(binary.LittleEndian.Uint16(buf[3:]))
-	msg.data = buf[5:]
+	msg.data = buf[5:n]
 	if msg.mtype == 0x41 || msg.mtype == 0x44 {
 	    u.mq <- msg
 	}
@@ -135,6 +138,7 @@ func (u *UDPconn)Connection() {
     q := make(chan bool, 32)
     ackq := make(chan bool, 32)
     ticker := time.NewTicker(time.Second)
+    mss := 50
     //
     for u.running {
 	if ulack == lastseq {
@@ -151,8 +155,8 @@ func (u *UDPconn)Connection() {
 	offset := 0
 	for ulptr != lastseq {
 	    datalen := ((lastseq + 65536) - ulptr) % 65536
-	    if datalen > 10 {
-		datalen = 10
+	    if datalen > mss {
+		datalen = mss
 	    }
 	    msglen := 1 + 2 + 2 + datalen
 	    seq := ulseq + offset
@@ -168,7 +172,7 @@ func (u *UDPconn)Connection() {
 	}
 	select {
 	case msg := <-u.mq:
-	    log.Printf("dequeue message type: %d\n", msg.mtype)
+	    //log.Printf("dequeue message type: %d\n", msg.mtype)
 	    if msg.mtype == 0x44 {
 		if msg.seq0 == dlseq {
 		    log.Printf("Data seq %d-%d\n", msg.seq0, msg.seq1)
