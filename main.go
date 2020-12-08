@@ -137,19 +137,20 @@ func (u *UDPconn)Connection() {
     ticker := time.NewTicker(time.Second)
     //
     for u.running {
-	if ulack == buflen {
+	if ulack == lastseq {
 	    select {
 	    case next := <-u.sendq:
 		ulbuf = next
 		buflen = len(ulbuf)
-		ulptr = 0
+		ulptr = ulseq
 		lastseq = ulseq + buflen
+		log.Printf("dequeue send message %d bytes lastseq=%d\n", buflen, lastseq)
 	    default:
 	    }
 	}
 	offset := 0
-	for ulptr < buflen {
-	    datalen := buflen - ulptr
+	for ulptr != lastseq {
+	    datalen := ((lastseq + 65536) - ulptr) % 65536
 	    if datalen > 10 {
 		datalen = 10
 	    }
@@ -161,7 +162,7 @@ func (u *UDPconn)Connection() {
 	    binary.LittleEndian.PutUint16(buf[3:], uint16(seq + datalen))
 	    copy(buf[5:], ulbuf)
 	    u.queue <- buf
-	    ulptr += datalen
+	    ulptr = (ulptr + datalen) % 65536
 	    offset += datalen
 	    ticker.Reset(100 * time.Millisecond)
 	}
@@ -293,7 +294,9 @@ func client(laddr, raddr, listen string) {
     }
     u.Connect()
     for u.running {
-	time.Sleep(time.Second)
+	time.Sleep(5 * time.Second)
+	msg := fmt.Sprintf("feed new message at %v", time.Now())
+	u.sendq <- []byte(msg)
     }
 }
 
