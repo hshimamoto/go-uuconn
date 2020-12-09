@@ -199,10 +199,10 @@ func (u *UDPconn)Connection() {
 		    log.Printf("Data seq %d-%d\n", msg.seq0, msg.seq1)
 		    dlseq = msg.seq1
 		    ackseq = msg.seq1
-		    if ackflag == false {
-			ackq <-true
-			ackflag = true
-		    }
+		}
+		if ackflag == false {
+		    ackq <-true
+		    ackflag = true
 		}
 	    }
 	    if msg.mtype == 0x41 {
