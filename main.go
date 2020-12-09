@@ -28,14 +28,112 @@ func NewStreamBuffer(sz int) *StreamBuffer {
 }
 
 type Stream struct {
+    sid int
     in, out *StreamBuffer
+    running bool
+    mq chan *Message
+    tq chan bool // timer queue
 }
 
-func NewStream(sz int) *Stream {
+func NewStream(sid, sz int) *Stream {
     s := &Stream{}
+    s.sid = sid
     s.in = NewStreamBuffer(sz)
     s.out = NewStreamBuffer(sz)
+    s.running = false
+    s.mq = make(chan *Message, 32)
+    s.tq = make(chan bool, 32)
     return s
+}
+
+func (s *Stream)Runner(queue chan<- []byte, sendq <-chan []byte) {
+    // uplink buffer
+    ulbuf := []byte("TEST MESSAGE TEST MESSAGE TEST MESSAGE TEST MESSAGE")
+    ulptr := 0
+    ulack := 0
+    ulseq := 0
+    ackseq := 0
+    ackflag := false
+    buflen := len(ulbuf)
+    lastseq := buflen
+    dlseq := 0
+    q := make(chan bool, 32)
+    ackq := make(chan bool, 32)
+    ticker := time.NewTicker(time.Second)
+    mss := 200
+    for s.running {
+	if ulack == lastseq {
+	    select {
+	    case next := <-sendq:
+		ulbuf = next
+		buflen = len(ulbuf)
+		ulptr = ulseq
+		lastseq = (ulseq + buflen) % 65536
+		log.Printf("dequeue send message %d bytes lastseq=%d\n", buflen, lastseq)
+	    default:
+	    }
+	}
+	offset := 0
+	for ulptr != lastseq {
+	    datalen := ((lastseq + 65536) - ulptr) % 65536
+	    if datalen > mss {
+		datalen = mss
+	    }
+	    seq0 := (ulseq + offset) % 65536
+	    seq1 := (ulseq + offset + datalen) % 65536
+	    msg := &Message{
+		mtype: MSG_DATA,
+		sid: 0,
+		seq0: seq0,
+		seq1: seq1,
+	    }
+	    buf := msg.Pack()
+	    queue <- buf
+	    ulptr = seq1
+	    offset += datalen
+	    ticker.Reset(100 * time.Millisecond)
+	}
+	select {
+	case msg := <-s.mq:
+	    switch msg.mtype {
+	    case MSG_DATA:
+		log.Printf("Data seq %d-%d\n", msg.seq0, msg.seq1)
+		if msg.seq0 == dlseq {
+		    dlseq = msg.seq1
+		    ackseq = msg.seq1
+		}
+		if ackflag == false {
+		    ackq <-true
+		    ackflag = true
+		}
+	    case MSG_ACK:
+		log.Printf("Ack seq %d-%d\n", msg.seq0, msg.seq1)
+		ulack = msg.seq0
+		ulseq = ulack
+	    }
+	case <-s.tq:
+	    if ulseq != lastseq {
+		log.Printf("rewind %d->%d (%d)\n", ulptr, ulseq, lastseq)
+		ulptr = ulseq
+	    }
+	case <-ticker.C:
+	    s.tq <- true
+	    ticker.Reset(time.Second)
+	case <-ackq:
+	    // ack!
+	    msg := &Message {
+		mtype: MSG_ACK,
+		sid: 0,
+		seq0: ackseq,
+		seq1: ackseq,
+	    }
+	    buf := msg.Pack()
+	    queue <- buf
+	    ackflag = false
+	case <-q:
+	    // ignore
+	}
+    }
 }
 
 type Message struct {
@@ -44,6 +142,10 @@ type Message struct {
     seq0, seq1 int
     data []byte
 }
+
+const MSG_DATA	int = 0x44 // Data
+const MSG_ACK	int = 0x41 // Ack
+const MSG_PROBE	int = 0x50 // Probe
 
 func (m *Message)Pack() []byte {
     datalen := len(m.data)
@@ -97,8 +199,6 @@ func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
     u.queue = make(chan []byte, 32)
     u.mq = make(chan *Message, 32)
     u.sendq = make(chan []byte, 32)
-    //
-    u.stream = NewStream(65536)
     return u, err
 }
 
@@ -125,7 +225,7 @@ func (u *UDPconn)Receiver() {
 	}
 	// parse
 	msg := ParseMessage(buf[:n])
-	if msg.mtype == 0x41 || msg.mtype == 0x44 {
+	if msg.mtype == MSG_DATA || msg.mtype == MSG_ACK {
 	    u.mq <- msg
 	}
     }
@@ -144,92 +244,15 @@ func (u *UDPconn)Sender() {
 }
 
 func (u *UDPconn)Connection() {
-    // uplink buffer
-    ulbuf := []byte("TEST MESSAGE TEST MESSAGE TEST MESSAGE TEST MESSAGE")
-    ulptr := 0
-    ulack := 0
-    ulseq := 0
-    ackseq := 0
-    ackflag := false
-    buflen := len(ulbuf)
-    lastseq := buflen
-    dlseq := 0
-    q := make(chan bool, 32)
-    ackq := make(chan bool, 32)
-    ticker := time.NewTicker(time.Second)
-    mss := 200
     //
+    u.stream = NewStream(0, 65536)
+    // start stream
+    u.stream.running = true
+    go u.stream.Runner(u.queue, u.sendq)
     for u.running {
-	if ulack == lastseq {
-	    select {
-	    case next := <-u.sendq:
-		ulbuf = next
-		buflen = len(ulbuf)
-		ulptr = ulseq
-		lastseq = (ulseq + buflen) % 65536
-		log.Printf("dequeue send message %d bytes lastseq=%d\n", buflen, lastseq)
-	    default:
-	    }
-	}
-	offset := 0
-	for ulptr != lastseq {
-	    datalen := ((lastseq + 65536) - ulptr) % 65536
-	    if datalen > mss {
-		datalen = mss
-	    }
-	    seq0 := (ulseq + offset) % 65536
-	    seq1 := (ulseq + offset + datalen) % 65536
-	    msg := &Message{
-		mtype: 0x44,
-		sid: 0,
-		seq0: seq0,
-		seq1: seq1,
-	    }
-	    buf := msg.Pack()
-	    u.queue <- buf
-	    ulptr = seq1
-	    offset += datalen
-	    ticker.Reset(100 * time.Millisecond)
-	}
 	select {
 	case msg := <-u.mq:
-	    //log.Printf("dequeue message type: %d\n", msg.mtype)
-	    if msg.mtype == 0x44 {
-		if msg.seq0 == dlseq {
-		    log.Printf("Data seq %d-%d\n", msg.seq0, msg.seq1)
-		    dlseq = msg.seq1
-		    ackseq = msg.seq1
-		}
-		if ackflag == false {
-		    ackq <-true
-		    ackflag = true
-		}
-	    }
-	    if msg.mtype == 0x41 {
-		log.Printf("ack %d\n", msg.seq0)
-		ulack = msg.seq0
-		ulseq = ulack
-	    }
-	case <-ticker.C:
-	    // rewind
-	    if ulseq != lastseq {
-		log.Printf("rewind %d->%d (%d)\n", ulptr, ulseq, lastseq)
-		ulptr = ulseq
-	    }
-	    ticker.Reset(time.Second)
-	case <-ackq:
-	    // ack!
-	    msg := &Message {
-		mtype: 0x41,
-		sid: 0,
-		seq0: ackseq,
-		seq1: ackseq,
-	    }
-	    buf := msg.Pack()
-	    u.queue <- buf
-	    ackflag = false
-	case <-q:
-	    // ignore
+	    u.stream.mq <- msg
 	}
     }
 }
