@@ -56,7 +56,6 @@ func (s *Stream)Runner(queue chan<- []byte, sendq <-chan []byte) {
     ackflag := false
     buflen := len(ulbuf)
     lastseq := buflen
-    seqstart := 0
     dlseq := 0
     q := make(chan bool, 32)
     ackq := make(chan bool, 32)
@@ -69,7 +68,6 @@ func (s *Stream)Runner(queue chan<- []byte, sendq <-chan []byte) {
 		ulbuf = next
 		buflen = len(ulbuf)
 		ulptr = ulseq
-		seqstart = ulseq
 		lastseq = (ulseq + buflen) % 65536
 		log.Printf("dequeue send message %d bytes lastseq=%d\n", buflen, lastseq)
 	    default:
@@ -119,9 +117,7 @@ func (s *Stream)Runner(queue chan<- []byte, sendq <-chan []byte) {
 	    }
 	case <-s.tq:
 	    if ulseq != lastseq {
-		if seqstart != ulseq {
-		    log.Printf("rewind %d->%d (%d)\n", ulptr, ulseq, lastseq)
-		}
+		log.Printf("rewind %d->%d (%d)\n", ulptr, ulseq, lastseq)
 		ulptr = ulseq
 	    }
 	case <-ticker.C:
