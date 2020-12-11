@@ -29,6 +29,7 @@ func NewStreamBuffer(sz int) *StreamBuffer {
 
 type Stream struct {
     sid int
+    used bool
     in, out *StreamBuffer
     running bool
     mq chan *Message
@@ -42,6 +43,7 @@ func NewStream(sid, sz int) *Stream {
     s.in = NewStreamBuffer(sz)
     s.out = NewStreamBuffer(sz)
     s.running = false
+    s.used = false
     s.mq = make(chan *Message, 32)
     s.tq = make(chan bool, 32)
     s.sendq = make(chan []byte, 32)
@@ -155,6 +157,16 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    // ignore
 	}
     }
+    go func() {
+	time.Sleep(time.Minute)
+	// make it's free
+	s.used = false
+    }()
+}
+
+func (s *Stream)StartRunner(queue chan<- []byte) {
+    s.running = true
+    go s.Runner(queue)
 }
 
 type Message struct {
@@ -197,7 +209,8 @@ type UDPconn struct {
     connected bool
     queue chan []byte
     mq chan *Message
-    stream *Stream
+    streams []*Stream
+    nr_streams int
 }
 
 func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
@@ -218,7 +231,37 @@ func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
     u.conn = conn
     u.queue = make(chan []byte, 32)
     u.mq = make(chan *Message, 32)
+    u.nr_streams = 64
+    u.streams = make([]*Stream, u.nr_streams)
+    for i, _ := range u.streams {
+	u.streams[i] = NewStream(i, 65536)
+    }
     return u, err
+}
+
+func (u *UDPconn)AllocStream(n int) *Stream {
+    if n < 0 {
+	for _, s := range u.streams {
+	    if s.used {
+		continue
+	    }
+	    // mark it
+	    s.used = true
+	    return s
+	}
+    } else {
+	if n >= u.nr_streams {
+	    return nil
+	}
+	s := u.streams[n]
+	if s.used {
+	    return nil
+	}
+	// mark it
+	s.used = true
+	return s
+    }
+    return nil
 }
 
 func (u *UDPconn)Receiver() {
@@ -263,15 +306,12 @@ func (u *UDPconn)Sender() {
 }
 
 func (u *UDPconn)Connection() {
-    //
-    u.stream = NewStream(0, 65536)
-    // start stream
-    u.stream.running = true
-    go u.stream.Runner(u.queue)
+    s := u.AllocStream(0)
+    s.StartRunner(u.queue)
     for u.running {
 	select {
 	case msg := <-u.mq:
-	    u.stream.mq <- msg
+	    s.mq <- msg
 	}
     }
 }
@@ -372,7 +412,7 @@ func client(laddr, raddr, listen string) {
 	    msg += "DUMMYDUMMY"
 	    msg += "dummydummy"
 	}
-	u.stream.sendq <- []byte(msg)
+	u.streams[0].sendq <- []byte(msg)
     }
 }
 
