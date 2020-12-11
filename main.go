@@ -33,6 +33,7 @@ type Stream struct {
     running bool
     mq chan *Message
     tq chan bool // timer queue
+    sendq chan []byte
 }
 
 func NewStream(sid, sz int) *Stream {
@@ -43,10 +44,11 @@ func NewStream(sid, sz int) *Stream {
     s.running = false
     s.mq = make(chan *Message, 32)
     s.tq = make(chan bool, 32)
+    s.sendq = make(chan []byte, 32)
     return s
 }
 
-func (s *Stream)Runner(queue chan<- []byte, sendq <-chan []byte) {
+func (s *Stream)Runner(queue chan<- []byte) {
     // uplink buffer
     ulbuf := []byte("TEST MESSAGE TEST MESSAGE TEST MESSAGE TEST MESSAGE")
     ulptr := 0
@@ -65,7 +67,7 @@ func (s *Stream)Runner(queue chan<- []byte, sendq <-chan []byte) {
     for s.running {
 	if ulack == lastseq {
 	    select {
-	    case next := <-sendq:
+	    case next := <-s.sendq:
 		ulbuf = next
 		buflen = len(ulbuf)
 		ulptr = ulseq
@@ -195,7 +197,6 @@ type UDPconn struct {
     connected bool
     queue chan []byte
     mq chan *Message
-    sendq chan []byte
     stream *Stream
 }
 
@@ -217,7 +218,6 @@ func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
     u.conn = conn
     u.queue = make(chan []byte, 32)
     u.mq = make(chan *Message, 32)
-    u.sendq = make(chan []byte, 32)
     return u, err
 }
 
@@ -267,7 +267,7 @@ func (u *UDPconn)Connection() {
     u.stream = NewStream(0, 65536)
     // start stream
     u.stream.running = true
-    go u.stream.Runner(u.queue, u.sendq)
+    go u.stream.Runner(u.queue)
     for u.running {
 	select {
 	case msg := <-u.mq:
@@ -372,7 +372,7 @@ func client(laddr, raddr, listen string) {
 	    msg += "DUMMYDUMMY"
 	    msg += "dummydummy"
 	}
-	u.sendq <- []byte(msg)
+	u.stream.sendq <- []byte(msg)
     }
 }
 
