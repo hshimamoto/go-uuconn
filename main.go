@@ -57,6 +57,7 @@ func (s *Stream)Runner(queue chan<- []byte, sendq <-chan []byte) {
     buflen := len(ulbuf)
     lastseq := buflen
     dlseq := 0
+    ultime := time.Now()
     q := make(chan bool, 32)
     ackq := make(chan bool, 32)
     ticker := time.NewTicker(time.Second)
@@ -74,6 +75,9 @@ func (s *Stream)Runner(queue chan<- []byte, sendq <-chan []byte) {
 	    }
 	}
 	offset := 0
+	if ulptr != lastseq {
+	    ultime = time.Now().Add(500 * time.Millisecond)
+	}
 	for ulptr != lastseq {
 	    datalen := ((lastseq + 65536) - ulptr) % 65536
 	    if datalen > mss {
@@ -91,7 +95,6 @@ func (s *Stream)Runner(queue chan<- []byte, sendq <-chan []byte) {
 	    queue <- buf
 	    ulptr = seq1
 	    offset += datalen
-	    ticker.Reset(100 * time.Millisecond)
 	}
 	select {
 	case msg := <-s.mq:
@@ -116,13 +119,15 @@ func (s *Stream)Runner(queue chan<- []byte, sendq <-chan []byte) {
 		ulseq = ulack
 	    }
 	case <-s.tq:
-	    if ulseq != lastseq {
-		log.Printf("rewind %d->%d (%d)\n", ulptr, ulseq, lastseq)
-		ulptr = ulseq
+	    // must wait a bit
+	    if time.Now().After(ultime) {
+		if ulseq != lastseq {
+		    log.Printf("rewind %d->%d (%d)\n", ulptr, ulseq, lastseq)
+		    ulptr = ulseq
+		}
 	    }
 	case <-ticker.C:
 	    s.tq <- true
-	    ticker.Reset(time.Second)
 	case <-ackq:
 	    // dequeue all
 	    empty := false
