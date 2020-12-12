@@ -472,6 +472,7 @@ func client(laddr, raddr, listen string) {
 
 func main() {
     log.Println("start")
+    rand.Seed(time.Now().Unix())
     // uuconn command options
     if len(os.Args) < 3 {
 	log.Println("uuconn command options...")
