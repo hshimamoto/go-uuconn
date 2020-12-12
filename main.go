@@ -5,6 +5,7 @@ import (
     "encoding/binary"
     "fmt"
     "log"
+    "math/rand"
     "net"
     "os"
     "time"
@@ -30,6 +31,7 @@ func NewStreamBuffer(sz int) *StreamBuffer {
 type Stream struct {
     sid int
     used bool
+    key int
     in, out *StreamBuffer
     running bool
     mq chan *Message
@@ -47,6 +49,7 @@ func NewStream(sid, sz int) *Stream {
     s.mq = make(chan *Message, 32)
     s.tq = make(chan bool, 32)
     s.sendq = make(chan []byte, 32)
+    s.key = rand.Intn(65536)
     return s
 }
 
@@ -165,6 +168,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 }
 
 func (s *Stream)StartRunner(queue chan<- []byte) {
+    log.Printf("start Stream %d\n", s.sid)
     s.running = true
     go s.Runner(queue)
 }
@@ -178,6 +182,8 @@ type Message struct {
 
 const MSG_DATA	int = 0x44 // Data
 const MSG_ACK	int = 0x41 // Ack
+const MSG_OPEN	int = 0x4f // Open
+const MSG_RESET	int = 0x52 // Reset
 const MSG_PROBE	int = 0x50 // Probe
 
 func (m *Message)Pack() []byte {
@@ -287,9 +293,7 @@ func (u *UDPconn)Receiver() {
 	}
 	// parse
 	msg := ParseMessage(buf[:n])
-	if msg.mtype == MSG_DATA || msg.mtype == MSG_ACK {
-	    u.mq <- msg
-	}
+	u.mq <- msg
     }
 }
 
@@ -306,12 +310,40 @@ func (u *UDPconn)Sender() {
 }
 
 func (u *UDPconn)Connection() {
-    s := u.AllocStream(0)
-    s.StartRunner(u.queue)
     for u.running {
 	select {
 	case msg := <-u.mq:
-	    s.mq <- msg
+	    sid := msg.sid
+	    if sid < 0 || sid >= u.nr_streams {
+		break
+	    }
+	    s := u.streams[sid]
+	    switch msg.mtype {
+	    case MSG_DATA, MSG_ACK:
+		s.mq <- msg
+	    case MSG_OPEN:
+		log.Printf("recv OPEN %d %d\n", msg.sid, msg.seq0)
+		// try to allocate s
+		if s.used {
+		    if s.key != msg.seq0 {
+			// send back reset
+			msg := &Message{
+			    mtype: MSG_RESET,
+			    sid: sid,
+			}
+			u.queue <- msg.Pack()
+		    }
+		    // just ignore
+		    break
+		}
+		// start new stream
+		s.used = true
+		s.key = msg.seq0
+		log.Printf("start stream %d\n", sid)
+		s.StartRunner(u.queue)
+	    case MSG_RESET:
+		// close the stream
+	    }
 	}
     }
 }
@@ -403,6 +435,20 @@ func client(laddr, raddr, listen string) {
 	return
     }
     u.Connect()
+    time.Sleep(time.Second)
+    // start stream 0
+    s := u.streams[0]
+    s.used = true
+    s.StartRunner(u.queue)
+    log.Printf("open\n")
+    msg := &Message{
+	mtype: MSG_OPEN,
+	sid: 0,
+	seq0: s.key,
+    }
+    u.queue <- msg.Pack()
+    u.queue <- msg.Pack()
+    u.queue <- msg.Pack()
     for u.running {
 	time.Sleep(5 * time.Second)
 	msg := fmt.Sprintf("feed new message at %v\n", time.Now())
