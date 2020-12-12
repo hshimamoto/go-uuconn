@@ -70,7 +70,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     q := make(chan bool, 32)
     ackq := make(chan bool, 32)
     ticker := time.NewTicker(time.Second)
-    mss := 200
+    mss := 500
     lastrecv := time.Now().Add(time.Minute)
     for s.running {
 	if ulack == lastseq {
@@ -493,6 +493,10 @@ func client(laddr, raddr, listen string) {
 	time.Sleep(5 * time.Second)
 	msg := fmt.Sprintf("feed new message at %v\n", time.Now())
 	for dummy := 0; dummy < 100; dummy++ {
+	    msg += "DUMMYDUMMY"
+	    msg += "dummydummy"
+	    msg += "DUMMYDUMMY"
+	    msg += "dummydummy"
 	    msg += "DUMMYDUMMY"
 	    msg += "dummydummy"
 	    msg += "DUMMYDUMMY"
