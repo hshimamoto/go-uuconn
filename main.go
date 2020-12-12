@@ -69,6 +69,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     ackq := make(chan bool, 32)
     ticker := time.NewTicker(time.Second)
     mss := 200
+    lastrecv := time.Now().Add(time.Minute)
     for s.running {
 	if ulack == lastseq {
 	    select {
@@ -106,6 +107,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	}
 	select {
 	case msg := <-s.mq:
+	    lastrecv = time.Now().Add(time.Minute)
 	    switch msg.mtype {
 	    case MSG_DATA:
 		log.Printf("Data seq %d-%d\n", msg.seq0, msg.seq1)
@@ -133,6 +135,11 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    log.Printf("rewind %d->%d (%d)\n", ulptr, ulseq, lastseq)
 		    ulptr = ulseq
 		}
+	    }
+	    if time.Now().After(lastrecv) {
+		log.Printf("no activity in %d\n", s.sid)
+		// close stream
+		s.running = false
 	    }
 	case <-ticker.C:
 	    s.tq <- true
@@ -166,6 +173,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	time.Sleep(time.Minute)
 	// make it's free
 	s.used = false
+	log.Printf("stream %d is now free\n", s.sid)
     }()
 }
 
