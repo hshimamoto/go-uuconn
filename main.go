@@ -117,21 +117,21 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    s.established = true
 	    switch msg.mtype {
 	    case MSG_DATA:
-		log.Printf("Data seq %d-%d\n", msg.seq0, msg.seq1)
+		log.Printf("[%d]Data seq %d-%d\n", msg.sid, msg.seq0, msg.seq1)
 		if msg.seq0 == dlseq {
 		    if ackseq != msg.seq1 {
-			log.Printf("Change ackseq %d -> %d\n", ackseq, msg.seq1)
+			log.Printf("[%d]Change ackseq %d -> %d\n", msg.sid, ackseq, msg.seq1)
 		    }
 		    dlseq = msg.seq1
 		    ackseq = msg.seq1
 		}
 		if ackflag == false {
-		    log.Printf("Queue Ack\n")
+		    //log.Printf("Queue Ack\n")
 		    ackq <-true
 		    ackflag = true
 		}
 	    case MSG_ACK:
-		log.Printf("Ack seq %d-%d\n", msg.seq0, msg.seq1)
+		log.Printf("[%d]Ack seq %d-%d\n", msg.sid, msg.seq0, msg.seq1)
 		ulack = msg.seq0
 		ulseq = ulack
 	    }
@@ -511,6 +511,7 @@ func client(laddr, raddr, listen string) {
     u.Connect()
     time.Sleep(100 * time.Millisecond)
     //
+    go dummy_stream(u)
     dummy_stream(u)
 }
 
