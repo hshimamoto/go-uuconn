@@ -95,6 +95,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    msg := &Message{
 		mtype: MSG_DATA,
 		sid: 0,
+		key: s.key,
 		seq0: seq0,
 		seq1: seq1,
 	    }
@@ -150,6 +151,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    msg := &Message {
 		mtype: MSG_ACK,
 		sid: 0,
+		key: s.key,
 		seq0: ackseq,
 		seq1: ackseq,
 	    }
@@ -176,6 +178,7 @@ func (s *Stream)StartRunner(queue chan<- []byte) {
 type Message struct {
     mtype int
     sid int
+    key int
     seq0, seq1 int
     data []byte
 }
@@ -188,13 +191,14 @@ const MSG_PROBE	int = 0x50 // Probe
 
 func (m *Message)Pack() []byte {
     datalen := len(m.data)
-    msglen := 1 + 1 + 2 + 2 + datalen
+    msglen := 1 + 1 + 2 + 2 + 2 + datalen
     buf := make([]byte, msglen)
     buf[0] = byte(m.mtype)
     buf[1] = byte(m.sid)
-    binary.LittleEndian.PutUint16(buf[2:], uint16(m.seq0))
-    binary.LittleEndian.PutUint16(buf[4:], uint16(m.seq1))
-    copy(buf[6:], m.data)
+    binary.LittleEndian.PutUint16(buf[2:], uint16(m.key))
+    binary.LittleEndian.PutUint16(buf[4:], uint16(m.seq0))
+    binary.LittleEndian.PutUint16(buf[6:], uint16(m.seq1))
+    copy(buf[8:], m.data)
     return buf
 }
 
@@ -202,9 +206,10 @@ func ParseMessage(buf []byte) *Message {
     msg := &Message{}
     msg.mtype = int(buf[0])
     msg.sid = int(buf[1])
-    msg.seq0 = int(binary.LittleEndian.Uint16(buf[2:]))
-    msg.seq1 = int(binary.LittleEndian.Uint16(buf[4:]))
-    msg.data = buf[6:]
+    msg.key = int(binary.LittleEndian.Uint16(buf[2:]))
+    msg.seq0 = int(binary.LittleEndian.Uint16(buf[4:]))
+    msg.seq1 = int(binary.LittleEndian.Uint16(buf[6:]))
+    msg.data = buf[8:]
     return msg
 }
 
@@ -320,12 +325,14 @@ func (u *UDPconn)Connection() {
 	    s := u.streams[sid]
 	    switch msg.mtype {
 	    case MSG_DATA, MSG_ACK:
-		s.mq <- msg
+		if msg.key == s.key {
+		    s.mq <- msg
+		}
 	    case MSG_OPEN:
-		log.Printf("recv OPEN %d %d\n", msg.sid, msg.seq0)
+		log.Printf("recv OPEN %d %d\n", msg.sid, msg.key)
 		// try to allocate s
 		if s.used {
-		    if s.key != msg.seq0 {
+		    if s.key != msg.key {
 			// send back reset
 			msg := &Message{
 			    mtype: MSG_RESET,
@@ -338,10 +345,11 @@ func (u *UDPconn)Connection() {
 		}
 		// start new stream
 		s.used = true
-		s.key = msg.seq0
+		s.key = msg.key
 		log.Printf("start stream %d\n", sid)
 		s.StartRunner(u.queue)
 	    case MSG_RESET:
+		log.Printf("recv RESET %d %d\n", msg.sid, msg.key)
 		// close the stream
 	    }
 	}
@@ -444,7 +452,7 @@ func client(laddr, raddr, listen string) {
     msg := &Message{
 	mtype: MSG_OPEN,
 	sid: 0,
-	seq0: s.key,
+	key: s.key,
     }
     u.queue <- msg.Pack()
     u.queue <- msg.Pack()
