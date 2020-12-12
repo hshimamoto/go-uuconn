@@ -57,14 +57,14 @@ func NewStream(sid, sz int) *Stream {
 
 func (s *Stream)Runner(queue chan<- []byte) {
     // uplink buffer
-    ulbuf := []byte("TEST MESSAGE TEST MESSAGE TEST MESSAGE TEST MESSAGE")
+    ulbuf := []byte(nil)
+    buflen := 0
     ulptr := 0
     ulack := 0
     ulseq := 0
     ackseq := 0
+    lastseq := 0
     ackflag := false
-    buflen := len(ulbuf)
-    lastseq := buflen
     dlseq := 0
     ultime := time.Now()
     q := make(chan bool, 32)
@@ -181,7 +181,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 }
 
 func (s *Stream)StartRunner(queue chan<- []byte) {
-    log.Printf("start Stream %d\n", s.sid)
+    log.Printf("start Runner %d %d\n", s.sid, s.key)
     s.running = true
     go s.Runner(queue)
 }
@@ -358,8 +358,15 @@ func (u *UDPconn)Connection() {
 		s.used = true
 		s.key = msg.key
 		s.established = true // server side
-		log.Printf("start stream %d\n", sid)
 		s.StartRunner(u.queue)
+		msg := &Message{
+		    mtype: MSG_ACK,
+		    sid: sid,
+		    key: s.key,
+		    seq0: 0,
+		    seq1: 0,
+		}
+		u.queue <- msg.Pack()
 	    case MSG_RESET:
 		log.Printf("recv RESET %d %d\n", msg.sid, msg.key)
 		// close the stream
