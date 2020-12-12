@@ -45,14 +45,18 @@ func NewStream(sid, sz int) *Stream {
     s.sid = sid
     s.in = NewStreamBuffer(sz)
     s.out = NewStreamBuffer(sz)
-    s.running = false
-    s.used = false
-    s.established = false
     s.mq = make(chan *Message, 32)
     s.tq = make(chan bool, 32)
     s.sendq = make(chan []byte, 32)
-    s.key = rand.Intn(65536)
+    s.used = false
+    s.Init()
     return s
+}
+
+func (s *Stream)Init() {
+    s.running = false
+    s.established = false
+    s.key = rand.Intn(65536)
 }
 
 func (s *Stream)Runner(queue chan<- []byte) {
@@ -97,7 +101,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    seq1 := (ulseq + offset + datalen) % 65536
 	    msg := &Message{
 		mtype: MSG_DATA,
-		sid: 0,
+		sid: s.sid,
 		key: s.key,
 		seq0: seq0,
 		seq1: seq1,
@@ -160,7 +164,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    // ack!
 	    msg := &Message {
 		mtype: MSG_ACK,
-		sid: 0,
+		sid: s.sid,
 		key: s.key,
 		seq0: ackseq,
 		seq1: ackseq,
@@ -461,6 +465,43 @@ func server(laddr, raddr, caddr string) {
     }
 }
 
+func dummy_stream(u *UDPconn) {
+    for u.running {
+	s := u.AllocStream(-1)
+	s.Init()
+	s.StartRunner(u.queue)
+	log.Printf("try to open %d %d\n", s.sid, s.key)
+	for i := 0; i < 10; i++ {
+	    msg := &Message{
+		mtype: MSG_OPEN,
+		sid: s.sid,
+		key: s.key,
+	    }
+	    u.queue <- msg.Pack()
+	    time.Sleep(100 * time.Millisecond)
+	    if !s.running || s.established {
+		break
+	    }
+	}
+	if !s.established {
+	    log.Printf("failed to open")
+	    // deallocate
+	    continue
+	}
+	for {
+	    time.Sleep(5 * time.Second)
+	    msg := fmt.Sprintf("feed new message at %v\n", time.Now())
+	    for dummy := 0; dummy < 100; dummy++ {
+		msg += "DUMMYDUMMYDUMMYDUMMYDUMMY"
+		msg += "dummydummydummydummydummy"
+		msg += "DUMMYDUMMYDUMMYDUMMYDUMMY"
+		msg += "dummydummydummydummydummy"
+	    }
+	    s.sendq <- []byte(msg)
+	}
+    }
+}
+
 func client(laddr, raddr, listen string) {
     u, err := NewUDPConn(laddr, raddr)
     if err != nil {
@@ -468,47 +509,9 @@ func client(laddr, raddr, listen string) {
 	return
     }
     u.Connect()
-    time.Sleep(time.Second)
-    // start stream 0
-    s := u.streams[0]
-    s.used = true
-    s.established = false
-    s.StartRunner(u.queue)
-    log.Printf("try to open\n")
-    for i := 0; i < 10; i++ {
-	msg := &Message{
-	    mtype: MSG_OPEN,
-	    sid: 0,
-	    key: s.key,
-	}
-	u.queue <- msg.Pack()
-	time.Sleep(100 * time.Millisecond)
-	if !s.running {
-	    break
-	}
-	if s.established {
-	    break
-	}
-    }
-    if !s.established {
-	log.Printf("failed to open\n")
-	return
-    }
-    for u.running {
-	time.Sleep(5 * time.Second)
-	msg := fmt.Sprintf("feed new message at %v\n", time.Now())
-	for dummy := 0; dummy < 100; dummy++ {
-	    msg += "DUMMYDUMMY"
-	    msg += "dummydummy"
-	    msg += "DUMMYDUMMY"
-	    msg += "dummydummy"
-	    msg += "DUMMYDUMMY"
-	    msg += "dummydummy"
-	    msg += "DUMMYDUMMY"
-	    msg += "dummydummy"
-	}
-	u.streams[0].sendq <- []byte(msg)
-    }
+    time.Sleep(100 * time.Millisecond)
+    //
+    dummy_stream(u)
 }
 
 func main() {
