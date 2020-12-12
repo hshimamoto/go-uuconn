@@ -37,6 +37,7 @@ type Stream struct {
     mq chan *Message
     tq chan bool // timer queue
     sendq chan []byte
+    established bool
 }
 
 func NewStream(sid, sz int) *Stream {
@@ -46,6 +47,7 @@ func NewStream(sid, sz int) *Stream {
     s.out = NewStreamBuffer(sz)
     s.running = false
     s.used = false
+    s.established = false
     s.mq = make(chan *Message, 32)
     s.tq = make(chan bool, 32)
     s.sendq = make(chan []byte, 32)
@@ -108,6 +110,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	select {
 	case msg := <-s.mq:
 	    lastrecv = time.Now().Add(time.Minute)
+	    s.established = true
 	    switch msg.mtype {
 	    case MSG_DATA:
 		log.Printf("Data seq %d-%d\n", msg.seq0, msg.seq1)
@@ -354,11 +357,13 @@ func (u *UDPconn)Connection() {
 		// start new stream
 		s.used = true
 		s.key = msg.key
+		s.established = true // server side
 		log.Printf("start stream %d\n", sid)
 		s.StartRunner(u.queue)
 	    case MSG_RESET:
 		log.Printf("recv RESET %d %d\n", msg.sid, msg.key)
 		// close the stream
+		s.running = false
 	    }
 	}
     }
@@ -455,16 +460,28 @@ func client(laddr, raddr, listen string) {
     // start stream 0
     s := u.streams[0]
     s.used = true
+    s.established = false
     s.StartRunner(u.queue)
-    log.Printf("open\n")
-    msg := &Message{
-	mtype: MSG_OPEN,
-	sid: 0,
-	key: s.key,
+    log.Printf("try to open\n")
+    for i := 0; i < 10; i++ {
+	msg := &Message{
+	    mtype: MSG_OPEN,
+	    sid: 0,
+	    key: s.key,
+	}
+	u.queue <- msg.Pack()
+	time.Sleep(100 * time.Millisecond)
+	if !s.running {
+	    break
+	}
+	if s.established {
+	    break
+	}
     }
-    u.queue <- msg.Pack()
-    u.queue <- msg.Pack()
-    u.queue <- msg.Pack()
+    if !s.established {
+	log.Printf("failed to open\n")
+	return
+    }
     for u.running {
 	time.Sleep(5 * time.Second)
 	msg := fmt.Sprintf("feed new message at %v\n", time.Now())
