@@ -59,6 +59,13 @@ func (s *Stream)Init() {
     s.key = rand.Intn(65536)
 }
 
+func (s *Stream)Logf(fmt string, a ...interface{}) {
+    args := make([]interface{}, len(a) + 1)
+    args[0] = s.sid
+    copy(args[1:], a)
+    log.Printf("[%d]" + fmt, args...)
+}
+
 func (s *Stream)Runner(queue chan<- []byte) {
     // uplink buffer
     ulbuf := []byte(nil)
@@ -84,7 +91,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		buflen = len(ulbuf)
 		ulptr = ulseq
 		lastseq = (ulseq + buflen) % 65536
-		log.Printf("dequeue send message %d bytes lastseq=%d\n", buflen, lastseq)
+		s.Logf("dequeue %d bytes lastseq=%d\n", buflen, lastseq)
 	    default:
 	    }
 	}
@@ -117,21 +124,20 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    s.established = true
 	    switch msg.mtype {
 	    case MSG_DATA:
-		log.Printf("[%d]Data seq %d-%d\n", msg.sid, msg.seq0, msg.seq1)
+		s.Logf("Data seq %d-%d\n", msg.seq0, msg.seq1)
 		if msg.seq0 == dlseq {
 		    if ackseq != msg.seq1 {
-			log.Printf("[%d]Change ackseq %d -> %d\n", msg.sid, ackseq, msg.seq1)
+			s.Logf("Change ackseq %d->%d\n", ackseq, msg.seq1)
 		    }
 		    dlseq = msg.seq1
 		    ackseq = msg.seq1
 		}
 		if ackflag == false {
-		    //log.Printf("Queue Ack\n")
 		    ackq <-true
 		    ackflag = true
 		}
 	    case MSG_ACK:
-		log.Printf("[%d]Ack seq %d-%d\n", msg.sid, msg.seq0, msg.seq1)
+		s.Logf("Ack seq %d-%d\n", msg.seq0, msg.seq1)
 		ulack = msg.seq0
 		ulseq = ulack
 	    }
@@ -139,12 +145,12 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    // must wait a bit
 	    if time.Now().After(ultime) {
 		if ulseq != lastseq {
-		    log.Printf("rewind %d->%d (%d)\n", ulptr, ulseq, lastseq)
+		    s.Logf("rewind %d->%d (%d)\n", ulptr, ulseq, lastseq)
 		    ulptr = ulseq
 		}
 	    }
 	    if time.Now().After(lastrecv) {
-		log.Printf("no activity in %d\n", s.sid)
+		s.Logf("no activity\n")
 		// close stream
 		s.running = false
 	    }
@@ -160,7 +166,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    empty = true
 		}
 	    }
-	    log.Printf("Send Ack %d\n", ackseq)
+	    s.Logf("Send Ack %d\n", ackseq)
 	    // ack!
 	    msg := &Message {
 		mtype: MSG_ACK,
