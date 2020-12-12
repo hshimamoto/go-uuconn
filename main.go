@@ -305,6 +305,11 @@ func (u *UDPconn)Receiver() {
 	}
 	//log.Printf("%d bytes from %v\n", n, addr)
 	if buf[0] == 0x50 { // 'P'robe
+	    // sendback probe
+	    u.queue <- []byte("probe")
+	    continue
+	}
+	if buf[0] == 0x70 { // 'p'robe
 	    continue
 	}
 	// parse
