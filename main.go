@@ -448,6 +448,30 @@ func (u *UDPconn)Connect() {
     go u.Connection()
 }
 
+func (u *UDPconn)OpenStream() *Stream {
+    s := u.AllocStream(-1)
+    s.Init()
+    log.Printf("try to open %d %d\n", s.sid, s.key)
+    s.StartRunner(u.queue)
+    for i := 0; i < 10; i++ {
+	msg := &Message{
+	    mtype: MSG_OPEN,
+	    sid: s.sid,
+	    key: s.key,
+	}
+	u.queue <- msg.Pack()
+	time.Sleep(100 * time.Millisecond)
+	if !s.running || s.established {
+	    break
+	}
+    }
+    if !s.established {
+	log.Printf("failed to open")
+	return nil
+    }
+    return s
+}
+
 func checker(laddr string) {
     addr, err := net.ResolveUDPAddr("udp", laddr)
     if err != nil {
@@ -509,25 +533,9 @@ func server(laddr, raddr, caddr string) {
 
 func dummy_stream(u *UDPconn) {
     for u.running {
-	s := u.AllocStream(-1)
-	s.Init()
-	s.StartRunner(u.queue)
-	log.Printf("try to open %d %d\n", s.sid, s.key)
-	for i := 0; i < 10; i++ {
-	    msg := &Message{
-		mtype: MSG_OPEN,
-		sid: s.sid,
-		key: s.key,
-	    }
-	    u.queue <- msg.Pack()
+	s := u.OpenStream()
+	if s == nil {
 	    time.Sleep(100 * time.Millisecond)
-	    if !s.running || s.established {
-		break
-	    }
-	}
-	if !s.established {
-	    log.Printf("failed to open")
-	    // deallocate
 	    continue
 	}
 	for {
