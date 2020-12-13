@@ -201,14 +201,6 @@ func (s *Stream)StartRunner(queue chan<- []byte) {
     log.Printf("start Runner %d %d\n", s.sid, s.key)
     s.running = true
     go s.Runner(queue)
-    // dummy reader
-    go func() {
-	buf := make([]byte, 256)
-	for s.running {
-	    n, _ := s.Read(buf)
-	    s.Logf("recv %d bytes %s\n", n, string(buf[:32]))
-	}
-    }()
 }
 
 func (s *Stream)Read(buf []byte) (int, error) {
@@ -279,6 +271,7 @@ type UDPconn struct {
     mq chan *Message
     streams []*Stream
     nr_streams int
+    handler func(s *Stream)
 }
 
 func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
@@ -304,6 +297,7 @@ func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
     for i, _ := range u.streams {
 	u.streams[i] = NewStream(i, 65536)
     }
+    u.handler = nil
     return u, err
 }
 
@@ -418,6 +412,10 @@ func (u *UDPconn)Connection() {
 		    seq1: 0,
 		}
 		u.queue <- msg.Pack()
+		// call handler
+		if u.handler != nil {
+		    u.handler(s)
+		}
 	    case MSG_RESET:
 		log.Printf("recv RESET %d %d\n", msg.sid, msg.key)
 		// close the stream
@@ -526,6 +524,17 @@ func server(laddr, raddr, caddr string) {
 	return
     }
     u.Connect()
+    u.handler = func(s *Stream) {
+	log.Printf("New stream %d %d\n", s.sid, s.key)
+	// dummy reader
+	go func() {
+	    buf := make([]byte, 256)
+	    for s.running {
+		n, _ := s.Read(buf)
+		s.Logf("recv %d bytes %s\n", n, string(buf[:32]))
+	    }
+	}()
+    }
     for u.running {
 	time.Sleep(time.Second)
     }
