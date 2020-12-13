@@ -47,10 +47,6 @@ func NewStream(sid, sz int) *Stream {
     s.sid = sid
     s.in = NewStreamBuffer(sz)
     s.out = NewStreamBuffer(sz)
-    s.mq = make(chan *Message, 32)
-    s.tq = make(chan bool, 32)
-    s.sendq = make(chan []byte, 32)
-    s.recvq = make(chan []byte, 32)
     s.used = false
     s.Init()
     return s
@@ -61,6 +57,10 @@ func (s *Stream)Init() {
     s.established = false
     s.key = rand.Intn(65536)
     s.recv = nil
+    s.mq = make(chan *Message, 32)
+    s.tq = make(chan bool, 32)
+    s.sendq = make(chan []byte, 32)
+    s.recvq = make(chan []byte, 32)
 }
 
 func (s *Stream)Logf(fmt string, a ...interface{}) {
@@ -424,6 +424,7 @@ func (u *UDPconn)Connection() {
 		    break
 		}
 		// start new stream
+		s.Init()
 		s.used = true
 		s.key = msg.key
 		s.established = true // server side
