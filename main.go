@@ -226,6 +226,11 @@ func (s *Stream)Read(buf []byte) (int, error) {
     return n, nil
 }
 
+func (s *Stream)Write(buf []byte) (int, error) {
+    s.sendq <- buf
+    return len(buf), nil
+}
+
 type Message struct {
     mtype int
     sid int
@@ -534,7 +539,7 @@ func dummy_stream(u *UDPconn) {
 		msg += "DUMMYDUMMYDUMMYDUMMYDUMMY"
 		msg += "dummydummydummydummydummy"
 	    }
-	    s.sendq <- []byte(msg)
+	    s.Write([]byte(msg))
 	}
     }
 }
