@@ -534,6 +534,13 @@ func server(laddr, raddr, caddr string) {
 		s.Logf("recv %d bytes %s\n", n, string(buf[:32]))
 	    }
 	}()
+	go func() {
+	    for s.running {
+		time.Sleep(time.Minute)
+		msg := "message from server"
+		s.Write([]byte(msg))
+	    }
+	}()
     }
     for u.running {
 	time.Sleep(time.Second)
@@ -547,6 +554,14 @@ func dummy_stream(u *UDPconn) {
 	    time.Sleep(100 * time.Millisecond)
 	    continue
 	}
+	// reader in client
+	go func() {
+	    buf := make([]byte, 1024)
+	    for s.running {
+		n, _ := s.Read(buf)
+		s.Logf("recv %d bytes %s\n", n, string(buf[:32]))
+	    }
+	}()
 	for {
 	    time.Sleep(5 * time.Second)
 	    msg := fmt.Sprintf("feed new message at %v\n", time.Now())
