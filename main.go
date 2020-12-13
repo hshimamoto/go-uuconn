@@ -85,7 +85,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     q := make(chan bool, 32)
     ackq := make(chan bool, 32)
     ticker := time.NewTicker(time.Second)
-    mss := 500
+    mss := 1000
     lastrecv := time.Now().Add(time.Minute)
     for s.running {
 	if ulack == lastseq {
@@ -528,7 +528,7 @@ func server(laddr, raddr, caddr string) {
 	log.Printf("New stream %d %d\n", s.sid, s.key)
 	// dummy reader
 	go func() {
-	    buf := make([]byte, 256)
+	    buf := make([]byte, 1024)
 	    for s.running {
 		n, _ := s.Read(buf)
 		s.Logf("recv %d bytes %s\n", n, string(buf[:32]))
