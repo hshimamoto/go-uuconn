@@ -37,7 +37,9 @@ type Stream struct {
     mq chan *Message
     tq chan bool // timer queue
     sendq chan []byte
+    recvq chan []byte
     established bool
+    recv []byte
 }
 
 func NewStream(sid, sz int) *Stream {
@@ -48,6 +50,7 @@ func NewStream(sid, sz int) *Stream {
     s.mq = make(chan *Message, 32)
     s.tq = make(chan bool, 32)
     s.sendq = make(chan []byte, 32)
+    s.recvq = make(chan []byte, 32)
     s.used = false
     s.Init()
     return s
@@ -57,6 +60,7 @@ func (s *Stream)Init() {
     s.running = false
     s.established = false
     s.key = rand.Intn(65536)
+    s.recv = nil
 }
 
 func (s *Stream)Logf(fmt string, a ...interface{}) {
@@ -113,6 +117,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		seq0: seq0,
 		seq1: seq1,
 	    }
+	    msg.data = ulbuf[offset:offset+datalen]
 	    buf := msg.Pack()
 	    queue <- buf
 	    ulptr = seq1
@@ -129,6 +134,8 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    if ackseq != msg.seq1 {
 			s.Logf("Change ackseq %d->%d\n", ackseq, msg.seq1)
 		    }
+		    s.recvq <- msg.data
+		    s.Logf("recvq: enqueue %d bytes\n", len(msg.data))
 		    dlseq = msg.seq1
 		    ackseq = msg.seq1
 		}
@@ -194,6 +201,29 @@ func (s *Stream)StartRunner(queue chan<- []byte) {
     log.Printf("start Runner %d %d\n", s.sid, s.key)
     s.running = true
     go s.Runner(queue)
+    // dummy reader
+    go func() {
+	buf := make([]byte, 256)
+	for s.running {
+	    n, _ := s.Read(buf)
+	    s.Logf("recv %d bytes %s\n", n, string(buf[:32]))
+	}
+    }()
+}
+
+func (s *Stream)Read(buf []byte) (int, error) {
+    if s.recv == nil {
+	s.recv = <-s.recvq
+	s.Logf("recvq: dequeue %d bytes\n", len(s.recv))
+    }
+    n := copy(buf, s.recv)
+    if n == len(s.recv) {
+	s.recv = nil
+    } else {
+	s.recv = s.recv[n:]
+	s.Logf("rest %d bytes\n", len(s.recv))
+    }
+    return n, nil
 }
 
 type Message struct {
@@ -230,7 +260,8 @@ func ParseMessage(buf []byte) *Message {
     msg.key = int(binary.LittleEndian.Uint16(buf[2:]))
     msg.seq0 = int(binary.LittleEndian.Uint16(buf[4:]))
     msg.seq1 = int(binary.LittleEndian.Uint16(buf[6:]))
-    msg.data = buf[8:]
+    msg.data = make([]byte, len(buf[8:]))
+    copy(msg.data, buf[8:])
     return msg
 }
 
