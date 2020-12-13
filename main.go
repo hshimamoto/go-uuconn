@@ -225,7 +225,9 @@ func (s *Stream)Read(buf []byte) (int, error) {
 }
 
 func (s *Stream)Write(buf []byte) (int, error) {
-    s.sendq <- buf
+    sendbuf := make([]byte, len(buf))
+    copy(sendbuf, buf)
+    s.sendq <- sendbuf
     return len(buf), nil
 }
 
