@@ -587,11 +587,9 @@ func dummy_stream(u *UDPconn) {
 	    }
 	}()
 	for {
-	    time.Sleep(5 * time.Second)
+	    time.Sleep(100 * time.Millisecond)
 	    msg := fmt.Sprintf("feed new message at %v\n", time.Now())
-	    for dummy := 0; dummy < 100; dummy++ {
-		msg += "DUMMYDUMMYDUMMYDUMMYDUMMY"
-		msg += "dummydummydummydummydummy"
+	    for dummy := 0; dummy < 50; dummy++ {
 		msg += "DUMMYDUMMYDUMMYDUMMYDUMMY"
 		msg += "dummydummydummydummydummy"
 	    }
