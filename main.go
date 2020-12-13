@@ -73,6 +73,7 @@ func (s *Stream)Logf(fmt string, a ...interface{}) {
 func (s *Stream)Runner(queue chan<- []byte) {
     // uplink buffer
     ulbuf := []byte(nil)
+    pendingbuf := []byte(nil)
     buflen := 0
     ulptr := 0
     ulack := 0
@@ -89,15 +90,30 @@ func (s *Stream)Runner(queue chan<- []byte) {
     lastrecv := time.Now().Add(time.Minute)
     lastack := time.Now().Add(20 * time.Millisecond)
     for s.running {
-	if ulack == lastseq {
+	if pendingbuf == nil {
 	    select {
 	    case next := <-s.sendq:
-		ulbuf = next
+		pendingbuf = next
+		s.Logf("dequeue %d bytes\n", buflen)
+	    default:
+	    }
+	}
+	if pendingbuf != nil {
+	    if ulack == lastseq {
+		ulbuf = pendingbuf
 		buflen = len(ulbuf)
 		ulptr = ulseq
 		lastseq = (ulseq + buflen) % 65536
-		s.Logf("dequeue %d bytes lastseq=%d\n", buflen, lastseq)
-	    default:
+		pendingbuf = nil
+		s.Logf("replace buffer lastseq=%d\n", lastseq)
+	    } else {
+		if len(pendingbuf) + buflen < 32768 {
+		    ulbuf = append(ulbuf, pendingbuf...)
+		    buflen = len(ulbuf)
+		    lastseq = (lastseq + len(pendingbuf)) % 65536
+		    pendingbuf = nil
+		    s.Logf("append buffer lastseq=%d\n", lastseq)
+		}
 	    }
 	}
 	offset := 0
