@@ -546,6 +546,26 @@ func check(laddr, raddr string) {
     log.Printf("Remote %s\n", string(buf[:n]))
 }
 
+func start_dummy_server(s *Stream) {
+    s.Logf("start dummy\n")
+    // dummy reader
+    go func() {
+	buf := make([]byte, 1024)
+	for s.running {
+	    n, _ := s.Read(buf)
+	    s.Logf("recv %d bytes %s\n", n, string(buf[:32]))
+	}
+    }()
+    // dummy writer
+    go func() {
+	for s.running {
+	    time.Sleep(time.Minute)
+	    msg := "message from server"
+	    s.Write([]byte(msg))
+	}
+    }()
+}
+
 func server(laddr, raddr, caddr string) {
     u, err := NewUDPConn(laddr, raddr)
     if err != nil {
@@ -555,20 +575,52 @@ func server(laddr, raddr, caddr string) {
     u.Connect()
     u.handler = func(s *Stream, remote string) {
 	log.Printf("[sid:%d key:%d]New stream for %s\n", s.sid, s.key, remote)
-	// dummy reader
+	if remote == "dummy" {
+	    start_dummy_server(s)
+	    return
+	}
+	// try to connect local
+	conn, err := session.Dial(remote)
+	if err != nil {
+	    s.Logf("Dial error %v\n", err)
+	    return
+	}
+	// conn will be closed in writer side
+	// reader side
 	go func() {
 	    buf := make([]byte, 1024)
 	    for s.running {
 		n, _ := s.Read(buf)
-		s.Logf("recv %d bytes %s\n", n, string(buf[:32]))
+		_, err := conn.Write(buf[:n])
+		if err != nil {
+		    s.Logf("remote write error %v\n", err)
+		    break
+		}
 	    }
+	    s.Logf("try to stop stream (reader side)\n")
+	    s.running = false
 	}()
+	// writer side
 	go func() {
+	    buf := make([]byte, 1024)
 	    for s.running {
-		time.Sleep(time.Minute)
-		msg := "message from server"
-		s.Write([]byte(msg))
+		n, err := conn.Read(buf)
+		if err != nil {
+		    s.Logf("remote read error %v\n", err)
+		    break
+		}
+		if n == 0 {
+		    s.Logf("remote conn closed\n")
+		    break
+		}
+		// push it to stream
+		s.Write(buf[:n])
 	    }
+	    s.Logf("try to stop stream (writer side)\n")
+	    s.running = false
+	    // wait a bit before closing conn
+	    time.Sleep(time.Second)
+	    conn.Close()
 	}()
     }
     for u.running {
