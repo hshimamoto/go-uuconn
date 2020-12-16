@@ -86,7 +86,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     q := make(chan bool, 32)
     ackq := make(chan bool, 32)
     ticker := time.NewTicker(time.Second)
-    mss := 1000
+    mss := 1024
     lastrecv := time.Now().Add(time.Minute)
     lastack := time.Now().Add(20 * time.Millisecond)
     for s.running {
