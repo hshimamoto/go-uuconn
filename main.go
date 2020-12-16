@@ -551,9 +551,18 @@ func start_dummy_server(s *Stream) {
     // dummy reader
     go func() {
 	buf := make([]byte, 1024)
+	cnt := 0
 	for s.running {
 	    n, _ := s.Read(buf)
-	    s.Logf("recv %d bytes %s\n", n, string(buf[:32]))
+	    s.Logf("recv %d bytes\n", n)
+	    // check count
+	    for i := 0; i < n; i++ {
+		if buf[i] != byte(cnt) {
+		    s.Logf("mismatch buf[%d]=%d != %d\n", i, buf[i], cnt)
+		    cnt = int(buf[i])
+		}
+		cnt = (cnt + 1) % 256
+	    }
 	}
     }()
     // dummy writer
@@ -643,14 +652,15 @@ func dummy_stream(u *UDPconn) {
 		s.Logf("recv %d bytes %s\n", n, string(buf[:32]))
 	    }
 	}()
+	cnt := 0
 	for {
 	    time.Sleep(5 * time.Second)
-	    msg := fmt.Sprintf("feed new message at %v\n", time.Now())
-	    for dummy := 0; dummy < 50; dummy++ {
-		msg += "DUMMYDUMMYDUMMYDUMMYDUMMY"
-		msg += "dummydummydummydummydummy"
+	    buf := make([]byte, 2000)
+	    for i := 0; i < 2000; i++ {
+		buf[i] = byte(cnt)
+		cnt++
 	    }
-	    s.Write([]byte(msg))
+	    s.Write(buf)
 	}
     }
 }
