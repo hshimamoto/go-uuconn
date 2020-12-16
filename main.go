@@ -295,7 +295,7 @@ type UDPconn struct {
     mq chan *Message
     streams []*Stream
     nr_streams int
-    handler func(s *Stream)
+    handler func(s *Stream, remote string)
 }
 
 func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
@@ -429,18 +429,19 @@ func (u *UDPconn)Connection() {
 		s.key = msg.key
 		s.established = true // server side
 		s.StartRunner(u.queue)
-		msg := &Message{
+		// call handler
+		if u.handler != nil {
+		    remote := string(msg.data)
+		    u.handler(s, remote)
+		}
+		ack := &Message{
 		    mtype: MSG_ACK,
 		    sid: sid,
 		    key: s.key,
 		    seq0: 0,
 		    seq1: 0,
 		}
-		u.queue <- msg.Pack()
-		// call handler
-		if u.handler != nil {
-		    u.handler(s)
-		}
+		u.queue <- ack.Pack()
 	    case MSG_RESET:
 		log.Printf("recv RESET %d %d\n", msg.sid, msg.key)
 		// close the stream
@@ -471,16 +472,19 @@ func (u *UDPconn)Connect() {
     go u.Connection()
 }
 
-func (u *UDPconn)OpenStream() *Stream {
+func (u *UDPconn)OpenStream(remote string) *Stream {
     s := u.AllocStream(-1)
     s.Init()
-    log.Printf("try to open %d %d\n", s.sid, s.key)
+    log.Printf("[sid:%d key:%d]try to open %s\n", s.sid, s.key, remote)
     s.StartRunner(u.queue)
     for i := 0; i < 10; i++ {
 	msg := &Message{
 	    mtype: MSG_OPEN,
 	    sid: s.sid,
 	    key: s.key,
+	    seq0: len(remote),
+	    seq1: len(remote),
+	    data: []byte(remote),
 	}
 	u.queue <- msg.Pack()
 	time.Sleep(100 * time.Millisecond)
@@ -549,8 +553,8 @@ func server(laddr, raddr, caddr string) {
 	return
     }
     u.Connect()
-    u.handler = func(s *Stream) {
-	log.Printf("New stream %d %d\n", s.sid, s.key)
+    u.handler = func(s *Stream, remote string) {
+	log.Printf("[sid:%d key:%d]New stream for %s\n", s.sid, s.key, remote)
 	// dummy reader
 	go func() {
 	    buf := make([]byte, 1024)
@@ -574,7 +578,7 @@ func server(laddr, raddr, caddr string) {
 
 func dummy_stream(u *UDPconn) {
     for u.running {
-	s := u.OpenStream()
+	s := u.OpenStream("dummy")
 	if s == nil {
 	    time.Sleep(100 * time.Millisecond)
 	    continue
@@ -613,7 +617,7 @@ func client(laddr, raddr, listen string) {
     serv, err := session.NewServer(listen, func(conn net.Conn) {
 	log.Printf("accepted\n")
 	defer conn.Close()
-	s := u.OpenStream()
+	s := u.OpenStream("localhost:22")
 	for s == nil {
 	    time.Sleep(100 * time.Millisecond)
 	    if !u.running {
