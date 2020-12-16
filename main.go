@@ -609,7 +609,59 @@ func client(laddr, raddr, listen string) {
     time.Sleep(100 * time.Millisecond)
     //
     go dummy_stream(u)
-    dummy_stream(u)
+    // start listening
+    serv, err := session.NewServer(listen, func(conn net.Conn) {
+	log.Printf("accepted\n")
+	defer conn.Close()
+	s := u.OpenStream()
+	for s == nil {
+	    time.Sleep(100 * time.Millisecond)
+	    if !u.running {
+		break
+	    }
+	}
+	if s == nil {
+	    log.Printf("unable to open stream\n")
+	    return
+	}
+	// reader in this stream
+	go func() {
+	    buf := make([]byte, 1024)
+	    for s.running {
+		n, _ := s.Read(buf)
+		s.Logf("recv %d bytes %s\n", n, string(buf[:32]))
+		_, err := conn.Write(buf[:n])
+		if err != nil {
+		    s.Logf("local write error %v\n", err)
+		    break
+		}
+	    }
+	    // stop stream
+	    s.Logf("try to stop stream (reader side)\n")
+	    s.running = false
+	}()
+	for s.running {
+	    buf := make([]byte, 1024)
+	    n, err := conn.Read(buf)
+	    if err != nil {
+		s.Logf("local read error %v\n", err)
+		break
+	    }
+	    if n == 0 {
+		s.Logf("local conn closed\n")
+		break
+	    }
+	    // push it to remote
+	    s.Write(buf[:n])
+	}
+	// stop stream
+	s.Logf("try to stop stream (writer side)\n")
+	s.running = false
+	// wait a bit before closing conn
+	time.Sleep(time.Second)
+    })
+    log.Printf("start listening on %s\n", listen)
+    serv.Run()
 }
 
 func main() {
@@ -648,14 +700,5 @@ func main() {
 	client(args[0], args[1], args[2])
 	return
     }
-    laddr := "127.0.0.1:13389"
-    serv, err := session.NewServer(laddr, func(conn net.Conn) {
-    })
-    if err != nil {
-	log.Println(err)
-	return
-    }
-    log.Println("start serv")
-    serv.Run()
     log.Println("end")
 }
