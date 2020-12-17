@@ -106,14 +106,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		lastseq = (ulseq + buflen) % 65536
 		pendingbuf = nil
 		s.Logf("replace buffer lastseq=%d\n", lastseq)
-	    } else {
-		if len(pendingbuf) + buflen < 32768 {
-		    ulbuf = append(ulbuf, pendingbuf...)
-		    buflen = len(ulbuf)
-		    lastseq = (lastseq + len(pendingbuf)) % 65536
-		    pendingbuf = nil
-		    s.Logf("append buffer lastseq=%d\n", lastseq)
-		}
 	    }
 	}
 	offset := 0
