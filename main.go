@@ -600,9 +600,18 @@ func server(laddr, raddr, caddr string) {
 	    buf := make([]byte, 1024)
 	    for s.running {
 		n, _ := s.Read(buf)
-		_, err := conn.Write(buf[:n])
-		if err != nil {
-		    s.Logf("remote write error %v\n", err)
+		out := buf[:n]
+		o := 0
+		for n > 0 {
+		    w, err := conn.Write(out[o:])
+		    if err != nil {
+			s.Logf("remote write error %v\n", err)
+			break
+		    }
+		    o += w
+		    n -= w
+		}
+		if n > 0 {
 		    break
 		}
 	    }
@@ -695,10 +704,18 @@ func client(laddr, raddr, listen string) {
 	    buf := make([]byte, 1024)
 	    for s.running {
 		n, _ := s.Read(buf)
-		s.Logf("recv %d bytes %s\n", n, string(buf[:32]))
-		_, err := conn.Write(buf[:n])
-		if err != nil {
-		    s.Logf("local write error %v\n", err)
+		out := buf[:n]
+		o := 0
+		for n > 0 {
+		    w, err := conn.Write(out[o:])
+		    if err != nil {
+			s.Logf("remote write error %v\n", err)
+			break
+		    }
+		    o += w
+		    n -= w
+		}
+		if n > 0 {
 		    break
 		}
 	    }
