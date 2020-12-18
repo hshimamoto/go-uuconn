@@ -104,7 +104,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		ulptr = ulseq
 		lastseq = (ulseq + buflen) % 65536
 		pendingbuf = nil
-		s.Logf("replace buffer lastseq=%d\n", lastseq)
+		s.Logf("replace buffer lastseq=%d (prev %d)\n", lastseq, ulack)
 	    }
 	}
 	offset := 0
@@ -126,18 +126,20 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		seq1: seq1,
 	    }
 	    msg.data = ulbuf[offset:offset+datalen]
+	    s.Logf("Push Data seq %d-%d\n", seq0, seq1)
 	    buf := msg.Pack()
 	    queue <- buf
 	    ulptr = seq1
 	    offset += datalen
 	}
+	s.Logf("start select\n")
 	select {
 	case msg := <-s.mq:
 	    lastrecv = time.Now().Add(time.Minute)
 	    s.established = true
 	    switch msg.mtype {
 	    case MSG_DATA:
-		s.Logf("Data seq %d-%d\n", msg.seq0, msg.seq1)
+		s.Logf("MSG: Data seq %d-%d\n", msg.seq0, msg.seq1)
 		if msg.seq0 == dlseq {
 		    if ackseq != msg.seq1 {
 			s.Logf("Change ackseq %d->%d\n", ackseq, msg.seq1)
@@ -152,7 +154,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    ackflag = true
 		}
 	    case MSG_ACK:
-		s.Logf("Ack seq %d-%d\n", msg.seq0, msg.seq1)
+		s.Logf("MSG: Ack seq %d-%d\n", msg.seq0, msg.seq1)
 		ulack = msg.seq0
 		ulseq = ulack
 	    }
@@ -170,6 +172,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		s.running = false
 	    }
 	case <-ticker.C:
+	    s.Logf("Ticker\n")
 	    s.tq <- true
 	case <-ackq:
 	    // dequeue all
