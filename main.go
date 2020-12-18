@@ -740,6 +740,7 @@ func client(laddr, raddr, listen, remote string) {
 }
 
 func main() {
+    log.SetFlags(log.Ldate|log.Ltime|log.Lmicroseconds|log.Lshortfile)
     log.Println("start")
     rand.Seed(time.Now().Unix())
     // uuconn command options
