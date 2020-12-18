@@ -35,7 +35,6 @@ type Stream struct {
     in, out *StreamBuffer
     running bool
     mq chan *Message
-    tq chan bool // timer queue
     bell chan bool // doorbell
     sendq chan []byte
     recvq chan []byte
@@ -59,7 +58,6 @@ func (s *Stream)Init() {
     s.key = rand.Intn(65536)
     s.recv = nil
     s.mq = make(chan *Message, 32)
-    s.tq = make(chan bool, 32)
     s.sendq = make(chan []byte, 32)
     s.recvq = make(chan []byte, 32)
     s.bell = make(chan bool, 32)
@@ -158,7 +156,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		ulack = msg.seq0
 		ulseq = ulack
 	    }
-	case <-s.tq:
+	case <-ticker.C:
 	    // must wait a bit
 	    if time.Now().After(ultime) {
 		if ulseq != lastseq {
@@ -171,8 +169,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		// close stream
 		s.running = false
 	    }
-	case <-ticker.C:
-	    s.tq <- true
 	case <-ackq:
 	    // dequeue all
 	    empty := false
