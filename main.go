@@ -85,7 +85,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
     ackflag := false
     dlseq := 0
     ultime := time.Now()
-    q := make(chan bool, 32)
     ackq := make(chan bool, 32)
     ticker := time.NewTicker(time.Second)
     mss := 1024
@@ -199,7 +198,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    queue <- buf
 	    ackflag = false
 	case <-s.bell:
-	case <-q:
 	    // ignore
 	}
     }
