@@ -36,6 +36,7 @@ type Stream struct {
     running bool
     mq chan *Message
     tq chan bool // timer queue
+    bell chan bool // doorbell
     sendq chan []byte
     recvq chan []byte
     established bool
@@ -61,6 +62,7 @@ func (s *Stream)Init() {
     s.tq = make(chan bool, 32)
     s.sendq = make(chan []byte, 32)
     s.recvq = make(chan []byte, 32)
+    s.bell = make(chan bool, 32)
 }
 
 func (s *Stream)Logf(fmt string, a ...interface{}) {
@@ -196,6 +198,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    buf := msg.Pack()
 	    queue <- buf
 	    ackflag = false
+	case <-s.bell:
 	case <-q:
 	    // ignore
 	}
@@ -233,6 +236,7 @@ func (s *Stream)Write(buf []byte) (int, error) {
     sendbuf := make([]byte, len(buf))
     copy(sendbuf, buf)
     s.sendq <- sendbuf
+    s.bell <- true
     return len(buf), nil
 }
 
