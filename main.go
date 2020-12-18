@@ -567,7 +567,7 @@ func start_dummy_server(s *Stream) {
     }()
 }
 
-func server(laddr, raddr, caddr string) {
+func server(laddr, raddr string) {
     u, err := NewUDPConn(laddr, raddr)
     if err != nil {
 	log.Printf("NewUDPConn: %v\n", err)
@@ -666,7 +666,7 @@ func dummy_stream(u *UDPconn) {
     }
 }
 
-func client(laddr, raddr, listen string) {
+func client(laddr, raddr, listen, remote string) {
     u, err := NewUDPConn(laddr, raddr)
     if err != nil {
 	log.Printf("NewUDPConn: %v\n", err)
@@ -675,12 +675,12 @@ func client(laddr, raddr, listen string) {
     u.Connect()
     time.Sleep(100 * time.Millisecond)
     //
-    go dummy_stream(u)
+    //go dummy_stream(u)
     // start listening
     serv, err := session.NewServer(listen, func(conn net.Conn) {
 	log.Printf("accepted\n")
 	defer conn.Close()
-	s := u.OpenStream("localhost:22")
+	s := u.OpenStream(remote)
 	for s == nil {
 	    time.Sleep(100 * time.Millisecond)
 	    if !u.running {
@@ -761,18 +761,18 @@ func main() {
 	check(args[0], args[1])
 	return
     case "server":
-	if len(args) < 3 {
-	    log.Println("uuconn server laddr raddr caddr")
+	if len(args) < 2 {
+	    log.Println("uuconn server laddr raddr")
 	    return
 	}
-	server(args[0], args[1], args[2])
+	server(args[0], args[1])
 	return
     case "client":
 	if len(args) < 3 {
 	    log.Println("uuconn client laddr raddr listen")
 	    return
 	}
-	client(args[0], args[1], args[2])
+	client(args[0], args[1], args[2], args[3])
 	return
     }
     log.Println("end")
