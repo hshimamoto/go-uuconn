@@ -133,7 +133,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    ulptr = seq1
 	    offset += datalen
 	}
-	s.Logf("start select\n")
 	select {
 	case msg := <-s.mq:
 	    lastrecv = time.Now().Add(time.Minute)
@@ -173,7 +172,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		s.running = false
 	    }
 	case <-ticker.C:
-	    s.Logf("Ticker\n")
 	    s.tq <- true
 	case <-ackq:
 	    // dequeue all
