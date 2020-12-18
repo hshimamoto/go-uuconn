@@ -94,7 +94,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    select {
 	    case next := <-s.sendq:
 		pendingbuf = next
-		s.Logf("dequeue %d bytes\n", buflen)
+		s.Logf("dequeue %d bytes (current %d)\n", len(pendingbuf), buflen)
 	    default:
 	    }
 	}
