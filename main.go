@@ -88,7 +88,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
     ticker := time.NewTicker(time.Second)
     mss := 1024
     lastrecv := time.Now().Add(time.Minute)
-    lastack := time.Now().Add(20 * time.Millisecond)
     for s.running {
 	if pendingbuf == nil {
 	    select {
@@ -182,10 +181,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    empty = true
 		}
 	    }
-	    if time.Now().Before(lastack) {
-		ackq <- true
-		break
-	    }
 	    s.Logf("Send Ack %d\n", ackseq)
 	    // ack!
 	    msg := &Message {
@@ -198,7 +193,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    buf := msg.Pack()
 	    queue <- buf
 	    ackflag = false
-	    lastack = time.Now().Add(20 * time.Millisecond)
 	case <-q:
 	    // ignore
 	}
