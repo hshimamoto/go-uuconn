@@ -15,6 +15,7 @@ import (
 )
 
 const MSS int = 1280
+const RDWRSZ int = 4096
 
 type StreamBuffer struct {
     buf []byte
@@ -561,7 +562,7 @@ func start_dummy_server(s *Stream) {
     s.Logf("start dummy\n")
     // dummy reader
     go func() {
-	buf := make([]byte, MSS)
+	buf := make([]byte, RDWRSZ)
 	cnt := 0
 	for s.running {
 	    n, _ := s.Read(buf)
@@ -608,7 +609,7 @@ func server(laddr, raddr string) {
 	// conn will be closed in writer side
 	// reader side
 	go func() {
-	    buf := make([]byte, MSS)
+	    buf := make([]byte, RDWRSZ)
 	    for s.running {
 		n, _ := s.Read(buf)
 		out := buf[:n]
@@ -631,7 +632,7 @@ func server(laddr, raddr string) {
 	}()
 	// writer side
 	go func() {
-	    buf := make([]byte, MSS)
+	    buf := make([]byte, RDWRSZ)
 	    for s.running {
 		n, err := conn.Read(buf)
 		if err != nil {
@@ -715,7 +716,7 @@ func client(laddr, raddr, listen, remote string) {
 	}
 	// reader in this stream
 	go func() {
-	    buf := make([]byte, MSS)
+	    buf := make([]byte, RDWRSZ)
 	    for s.running {
 		n, _ := s.Read(buf)
 		out := buf[:n]
@@ -738,7 +739,7 @@ func client(laddr, raddr, listen, remote string) {
 	    s.running = false
 	}()
 	for s.running {
-	    buf := make([]byte, MSS)
+	    buf := make([]byte, RDWRSZ)
 	    n, err := conn.Read(buf)
 	    if err != nil {
 		s.Logf("local read error %v\n", err)
