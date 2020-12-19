@@ -35,6 +35,7 @@ type Stream struct {
     sid int
     used bool
     key int
+    renc, wenc byte
     in, out *StreamBuffer
     running bool
     mq chan *Message
@@ -51,14 +52,16 @@ func NewStream(sid, sz int) *Stream {
     s.in = NewStreamBuffer(sz)
     s.out = NewStreamBuffer(sz)
     s.used = false
-    s.Init()
+    s.Init(rand.Intn(65536))
     return s
 }
 
-func (s *Stream)Init() {
+func (s *Stream)Init(key int) {
     s.running = false
     s.established = false
-    s.key = rand.Intn(65536)
+    s.key = key
+    s.renc = byte(key)
+    s.wenc = byte(key)
     s.recv = nil
     s.mq = make(chan *Message, 32)
     s.sendq = make(chan []byte, 32)
@@ -227,7 +230,14 @@ func (s *Stream)Read(buf []byte) (int, error) {
 	s.recv = <-s.recvq
 	s.Tracef("recvq: dequeue %d bytes\n", len(s.recv))
     }
-    n := copy(buf, s.recv)
+    n := len(buf)
+    if n > len(s.recv) {
+	n = len(s.recv)
+    }
+    for i := 0; i < n; i++ {
+	buf[i] = s.recv[i] ^ s.renc
+	s.renc++
+    }
     if n == len(s.recv) {
 	s.recv = nil
     } else {
@@ -239,7 +249,11 @@ func (s *Stream)Read(buf []byte) (int, error) {
 
 func (s *Stream)Write(buf []byte) (int, error) {
     sendbuf := make([]byte, len(buf))
-    copy(sendbuf, buf)
+    n := len(buf)
+    for i := 0; i < n; i++ {
+	sendbuf[i] = buf[i] ^ s.wenc
+	s.wenc++
+    }
     s.sendq <- sendbuf
     s.bell <- true
     return len(buf), nil
@@ -422,9 +436,8 @@ func (u *UDPconn)Connection() {
 		    break
 		}
 		// start new stream
-		s.Init()
+		s.Init(msg.key)
 		s.used = true
-		s.key = msg.key
 		s.established = true // server side
 		s.StartRunner(u.queue)
 		// call handler
@@ -472,7 +485,7 @@ func (u *UDPconn)Connect() {
 
 func (u *UDPconn)OpenStream(remote string) *Stream {
     s := u.AllocStream(-1)
-    s.Init()
+    s.Init(rand.Intn(65536))
     log.Printf("[sid:%d key:%d]try to open %s\n", s.sid, s.key, remote)
     s.StartRunner(u.queue)
     for i := 0; i < 10; i++ {
