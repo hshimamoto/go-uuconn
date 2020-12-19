@@ -686,10 +686,13 @@ func client(laddr, raddr, listen, remote string) {
 	log.Printf("accepted\n")
 	defer conn.Close()
 	s := u.OpenStream(remote)
-	for s == nil {
-	    time.Sleep(100 * time.Millisecond)
-	    if !u.running {
-		break
+	for i := 0; i < 10; i++ {
+	    for s == nil {
+		if !u.running {
+		    break
+		}
+		time.Sleep(100 * time.Millisecond)
+		s = u.OpenStream(remote)
 	    }
 	}
 	if s == nil {
