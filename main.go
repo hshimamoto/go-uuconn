@@ -4,12 +4,13 @@ package main
 import (
     "encoding/binary"
     "fmt"
-    "log"
+    "io"
     "math/rand"
     "net"
     "os"
     "time"
 
+    log "github.com/sirupsen/logrus"
     "github.com/hshimamoto/go-session"
 )
 
@@ -733,7 +734,11 @@ func client(laddr, raddr, listen, remote string) {
 }
 
 func main() {
-    log.SetFlags(log.Ldate|log.Ltime|log.Lmicroseconds|log.Lshortfile)
+    f, _ := os.Create("uuconn.log")
+    log.SetFormatter(&log.JSONFormatter{})
+    mw := io.MultiWriter(os.Stderr, f)
+    log.SetOutput(mw)
+    log.SetLevel(log.TraceLevel)
     log.Println("start")
     rand.Seed(time.Now().Unix())
     // uuconn command options
