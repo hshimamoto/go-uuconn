@@ -746,7 +746,7 @@ func client(laddr, raddr, listen, remote string) {
 
 func main() {
     f, _ := os.Create("uuconn.log")
-    log.SetFormatter(&log.JSONFormatter{})
+    log.SetFormatter(&log.JSONFormatter{TimestampFormat:"2006-01-02 15:04:05.000000"})
     mw := io.MultiWriter(os.Stderr, f)
     log.SetOutput(mw)
     log.SetLevel(log.TraceLevel)
