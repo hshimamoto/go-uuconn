@@ -64,11 +64,18 @@ func (s *Stream)Init() {
     s.bell = make(chan bool, 32)
 }
 
+func (s *Stream)Tracef(fmt string, a ...interface{}) {
+    args := make([]interface{}, len(a) + 1)
+    args[0] = s.sid
+    copy(args[1:], a)
+    log.Tracef("[%d]" + fmt, args...)
+}
+
 func (s *Stream)Logf(fmt string, a ...interface{}) {
     args := make([]interface{}, len(a) + 1)
     args[0] = s.sid
     copy(args[1:], a)
-    log.Printf("[%d]" + fmt, args...)
+    log.Infof("[%d]" + fmt, args...)
 }
 
 func (s *Stream)Runner(queue chan<- []byte) {
@@ -93,7 +100,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    select {
 	    case next := <-s.sendq:
 		pendingbuf = next
-		s.Logf("dequeue %d bytes (current %d)\n", len(pendingbuf), buflen)
+		s.Tracef("dequeue %d bytes (current %d)\n", len(pendingbuf), buflen)
 	    default:
 	    }
 	}
@@ -104,7 +111,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		ulptr = ulseq
 		lastseq = (ulseq + buflen) % 65536
 		pendingbuf = nil
-		s.Logf("replace buffer lastseq=%d (prev %d)\n", lastseq, ulack)
+		s.Tracef("replace buffer lastseq=%d (prev %d)\n", lastseq, ulack)
 	    }
 	}
 	offset := 0
@@ -126,7 +133,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		seq1: seq1,
 	    }
 	    msg.data = ulbuf[offset:offset+datalen]
-	    s.Logf("Push Data seq %d-%d\n", seq0, seq1)
+	    s.Tracef("Push Data seq %d-%d\n", seq0, seq1)
 	    buf := msg.Pack()
 	    queue <- buf
 	    ulptr = seq1
@@ -138,13 +145,13 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    s.established = true
 	    switch msg.mtype {
 	    case MSG_DATA:
-		s.Logf("MSG: Data seq %d-%d\n", msg.seq0, msg.seq1)
+		s.Tracef("MSG: Data seq %d-%d\n", msg.seq0, msg.seq1)
 		if msg.seq0 == dlseq {
 		    if ackseq != msg.seq1 {
-			s.Logf("Change ackseq %d->%d\n", ackseq, msg.seq1)
+			s.Tracef("Change ackseq %d->%d\n", ackseq, msg.seq1)
 		    }
 		    s.recvq <- msg.data
-		    s.Logf("recvq: enqueue %d bytes\n", len(msg.data))
+		    s.Tracef("recvq: enqueue %d bytes\n", len(msg.data))
 		    dlseq = msg.seq1
 		    ackseq = msg.seq1
 		}
@@ -153,7 +160,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    ackflag = true
 		}
 	    case MSG_ACK:
-		s.Logf("MSG: Ack seq %d-%d\n", msg.seq0, msg.seq1)
+		s.Tracef("MSG: Ack seq %d-%d\n", msg.seq0, msg.seq1)
 		ulack = msg.seq0
 		ulseq = ulack
 	    }
@@ -161,7 +168,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    // must wait a bit
 	    if time.Now().After(ultime) {
 		if ulseq != lastseq {
-		    s.Logf("rewind %d->%d (%d)\n", ulptr, ulseq, lastseq)
+		    s.Tracef("rewind %d->%d (%d)\n", ulptr, ulseq, lastseq)
 		    ulptr = ulseq
 		}
 	    }
@@ -180,7 +187,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    empty = true
 		}
 	    }
-	    s.Logf("Send Ack %d\n", ackseq)
+	    s.Tracef("Send Ack %d\n", ackseq)
 	    // ack!
 	    msg := &Message {
 		mtype: MSG_ACK,
@@ -213,14 +220,14 @@ func (s *Stream)StartRunner(queue chan<- []byte) {
 func (s *Stream)Read(buf []byte) (int, error) {
     if s.recv == nil {
 	s.recv = <-s.recvq
-	s.Logf("recvq: dequeue %d bytes\n", len(s.recv))
+	s.Tracef("recvq: dequeue %d bytes\n", len(s.recv))
     }
     n := copy(buf, s.recv)
     if n == len(s.recv) {
 	s.recv = nil
     } else {
 	s.recv = s.recv[n:]
-	s.Logf("rest %d bytes\n", len(s.recv))
+	s.Tracef("rest %d bytes\n", len(s.recv))
     }
     return n, nil
 }
@@ -540,11 +547,11 @@ func start_dummy_server(s *Stream) {
 	cnt := 0
 	for s.running {
 	    n, _ := s.Read(buf)
-	    s.Logf("recv %d bytes\n", n)
+	    s.Tracef("recv %d bytes\n", n)
 	    // check count
 	    for i := 0; i < n; i++ {
 		if buf[i] != byte(cnt) {
-		    s.Logf("mismatch buf[%d]=%d != %d\n", i, buf[i], cnt)
+		    s.Tracef("mismatch buf[%d]=%d != %d\n", i, buf[i], cnt)
 		    cnt = int(buf[i])
 		}
 		cnt = (cnt + 1) % 256
@@ -644,7 +651,7 @@ func dummy_stream(u *UDPconn) {
 	    buf := make([]byte, 1024)
 	    for s.running {
 		n, _ := s.Read(buf)
-		s.Logf("recv %d bytes %s\n", n, string(buf[:32]))
+		s.Tracef("recv %d bytes %s\n", n, string(buf[:32]))
 	    }
 	}()
 	cnt := 0
