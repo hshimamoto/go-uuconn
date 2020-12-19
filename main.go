@@ -426,6 +426,7 @@ func (u *UDPconn)Connection() {
 		// try to allocate s
 		if s.used {
 		    if s.key != msg.key {
+			log.Printf("bad OPEN vs %d\n", s.key)
 			// send back reset
 			msg := &Message{
 			    mtype: MSG_RESET,
@@ -453,6 +454,8 @@ func (u *UDPconn)Connection() {
 		    seq0: 0,
 		    seq1: 0,
 		}
+		u.queue <- ack.Pack()
+		u.queue <- ack.Pack()
 		u.queue <- ack.Pack()
 	    case MSG_RESET:
 		log.Printf("recv RESET %d %d\n", msg.sid, msg.key)
