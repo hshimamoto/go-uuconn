@@ -96,11 +96,15 @@ func (s *Stream)Runner(queue chan<- []byte) {
     mss := 1024
     lastrecv := time.Now().Add(time.Minute)
     for s.running {
-	if pendingbuf == nil {
+	if pendingbuf == nil || len(pendingbuf) < 8192 {
 	    select {
 	    case next := <-s.sendq:
-		pendingbuf = next
-		s.Tracef("dequeue %d bytes (current %d)\n", len(pendingbuf), buflen)
+		s.Tracef("dequeue %d bytes (current %d, pending %d)\n", len(next), buflen, len(pendingbuf))
+		if pendingbuf != nil {
+		    pendingbuf = append(pendingbuf, next...)
+		} else {
+		    pendingbuf = next
+		}
 	    default:
 	    }
 	}
