@@ -752,7 +752,7 @@ func main() {
     log.SetFormatter(&log.JSONFormatter{TimestampFormat:"2006-01-02 15:04:05.000000"})
     mw := io.MultiWriter(os.Stderr, f)
     log.SetOutput(mw)
-    log.SetLevel(log.TraceLevel)
+    log.SetLevel(log.DebugLevel)
     log.Println("start")
     rand.Seed(time.Now().Unix())
     // uuconn command options
