@@ -540,7 +540,7 @@ func check(laddr, raddr string) {
     conn.WriteToUDP([]byte("Probe"), addr)
     buf := make([]byte, 1500)
     n, _, _ := conn.ReadFromUDP(buf)
-    log.Printf("Remote %s\n", string(buf[:n]))
+    fmt.Printf("Remote %s\n", string(buf[:n]))
 }
 
 func start_dummy_server(s *Stream) {
