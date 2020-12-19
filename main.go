@@ -14,6 +14,8 @@ import (
     "github.com/hshimamoto/go-session"
 )
 
+const MSS int = 1280
+
 type StreamBuffer struct {
     buf []byte
     sz int
@@ -93,10 +95,9 @@ func (s *Stream)Runner(queue chan<- []byte) {
     ultime := time.Now()
     ackq := make(chan bool, 32)
     ticker := time.NewTicker(time.Second)
-    mss := 1024
     lastrecv := time.Now().Add(time.Minute)
     for s.running {
-	if pendingbuf == nil || len(pendingbuf) < 8192 {
+	if pendingbuf == nil || len(pendingbuf) < 32768 {
 	    select {
 	    case next := <-s.sendq:
 		s.Tracef("dequeue %d bytes (current %d, pending %d)\n", len(next), buflen, len(pendingbuf))
@@ -124,8 +125,8 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	}
 	for ulptr != lastseq {
 	    datalen := ((lastseq + 65536) - ulptr) % 65536
-	    if datalen > mss {
-		datalen = mss
+	    if datalen > MSS {
+		datalen = MSS
 	    }
 	    seq0 := (ulseq + offset) % 65536
 	    seq1 := (ulseq + offset + datalen) % 65536
@@ -547,7 +548,7 @@ func start_dummy_server(s *Stream) {
     s.Logf("start dummy\n")
     // dummy reader
     go func() {
-	buf := make([]byte, 1024)
+	buf := make([]byte, MSS)
 	cnt := 0
 	for s.running {
 	    n, _ := s.Read(buf)
@@ -594,7 +595,7 @@ func server(laddr, raddr string) {
 	// conn will be closed in writer side
 	// reader side
 	go func() {
-	    buf := make([]byte, 1024)
+	    buf := make([]byte, MSS)
 	    for s.running {
 		n, _ := s.Read(buf)
 		out := buf[:n]
@@ -617,7 +618,7 @@ func server(laddr, raddr string) {
 	}()
 	// writer side
 	go func() {
-	    buf := make([]byte, 1024)
+	    buf := make([]byte, MSS)
 	    for s.running {
 		n, err := conn.Read(buf)
 		if err != nil {
@@ -701,7 +702,7 @@ func client(laddr, raddr, listen, remote string) {
 	}
 	// reader in this stream
 	go func() {
-	    buf := make([]byte, 1024)
+	    buf := make([]byte, MSS)
 	    for s.running {
 		n, _ := s.Read(buf)
 		out := buf[:n]
@@ -724,7 +725,7 @@ func client(laddr, raddr, listen, remote string) {
 	    s.running = false
 	}()
 	for s.running {
-	    buf := make([]byte, 1024)
+	    buf := make([]byte, MSS)
 	    n, err := conn.Read(buf)
 	    if err != nil {
 		s.Logf("local read error %v\n", err)
