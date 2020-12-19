@@ -181,6 +181,11 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    ulptr = ulseq
 		}
 	    }
+	    // keep alive
+	    if ackflag == false {
+		ackq <- true
+		ackflag = true
+	    }
 	    if time.Now().After(lastrecv) {
 		s.Logf("no activity\n")
 		// close stream
