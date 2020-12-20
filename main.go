@@ -236,8 +236,10 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    // ignore
 	}
     }
+    ticker.Stop()
     // clear queue
     s.key = -1
+    time.Sleep(time.Second)
     empty := false
     cnt := 0
     for !empty {
@@ -252,6 +254,15 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    empty = true
 	}
     }
+    // close channels
+    close(s.mq)
+    s.mq = nil
+    close(s.sendq)
+    s.sendq = nil
+    close(s.bell)
+    s.bell = nil
+    close(ackq)
+    ackq = nil
     s.Debugf("discard %d items\n", cnt)
     time.Sleep(time.Minute)
     // make it's free
