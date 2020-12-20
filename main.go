@@ -427,7 +427,9 @@ func (u *UDPconn)Connection() {
 	    switch msg.mtype {
 	    case MSG_DATA, MSG_ACK:
 		if msg.key == s.key {
-		    s.mq <- msg
+		    go func() {
+			s.mq <- msg
+		    }()
 		}
 	    case MSG_OPEN:
 		log.Printf("recv OPEN %d %d\n", msg.sid, msg.key)
@@ -527,6 +529,8 @@ func (u *UDPconn)OpenStream(remote string) *Stream {
     }
     if !s.established {
 	log.Printf("[sid:%d key:%d] failed to open\n", s.sid, s.key)
+	// stopping
+	s.running = false
 	return nil
     }
     return s
