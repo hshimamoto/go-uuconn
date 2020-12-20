@@ -719,13 +719,15 @@ func client(laddr, raddr, listen, remote string) {
 	defer conn.Close()
 	s := u.OpenStream(remote)
 	for i := 0; i < 10; i++ {
-	    for s == nil {
+	    if s != nil {
+		break
+	    } else {
 		if !u.running {
-		    break
+		    return
 		}
-		time.Sleep(100 * time.Millisecond)
-		s = u.OpenStream(remote)
 	    }
+	    time.Sleep(100 * time.Millisecond)
+	    s = u.OpenStream(remote)
 	}
 	if s == nil {
 	    log.Printf("unable to open stream\n")
