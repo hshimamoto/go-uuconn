@@ -108,6 +108,9 @@ func (s *Stream)Runner(queue chan<- []byte) {
     ticker := time.NewTicker(time.Second)
     lastrecv := time.Now().Add(time.Minute)
     keepalive := time.Now().Add(10 * time.Second)
+    nr_replace := 0
+    nr_append := 0
+    nr_rewind := 0
     for s.running {
 	if pendingbuf == nil || len(pendingbuf) < 32768 {
 	    select {
@@ -115,6 +118,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		s.Tracef("dequeue %d bytes (current %d, pending %d)\n", len(next), buflen, len(pendingbuf))
 		if pendingbuf != nil {
 		    pendingbuf = append(pendingbuf, next...)
+		    nr_append++
 		} else {
 		    pendingbuf = next
 		}
@@ -129,6 +133,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		lastseq = (ulseq + buflen) % 65536
 		pendingbuf = nil
 		s.Tracef("replace buffer lastseq=%d (prev %d)\n", lastseq, ulack)
+		nr_replace++
 	    }
 	}
 	offset := 0
@@ -191,6 +196,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		if ulseq != lastseq {
 		    s.Tracef("rewind %d->%d (%d)\n", ulptr, ulseq, lastseq)
 		    ulptr = ulseq
+		    nr_rewind++
 		}
 	    }
 	    // keep alive
@@ -264,6 +270,8 @@ func (s *Stream)Runner(queue chan<- []byte) {
     close(ackq)
     ackq = nil
     s.Debugf("discard %d items\n", cnt)
+    //
+    s.Debugf("stats %d append %d replace %d rewind\n", nr_append, nr_replace, nr_rewind)
     time.Sleep(time.Minute)
     // make it's free
     s.used = false
