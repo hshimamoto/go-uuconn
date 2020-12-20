@@ -111,6 +111,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     nr_replace := 0
     nr_append := 0
     nr_rewind := 0
+    nr_badack := 0
     for s.running {
 	if pendingbuf == nil || len(pendingbuf) < 32768 {
 	    select {
@@ -186,8 +187,13 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		}
 	    case MSG_ACK:
 		s.Tracef("MSG: Ack seq %d-%d\n", msg.seq0, msg.seq1)
-		ulack = msg.seq0
-		ulseq = ulack
+		diff := (65536 + msg.seq0 - ulack) % 65536
+		if diff < 32768 {
+		    ulack = msg.seq0
+		    ulseq = ulack
+		} else {
+		    nr_badack++
+		}
 	    }
 	    // ignore KEEP
 	case <-ticker.C:
@@ -271,7 +277,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     ackq = nil
     s.Debugf("discard %d items\n", cnt)
     //
-    s.Debugf("stats %d append %d replace %d rewind\n", nr_append, nr_replace, nr_rewind)
+    s.Debugf("stats %d append %d replace %d rewind %d badack\n", nr_append, nr_replace, nr_rewind, nr_badack)
     time.Sleep(time.Minute)
     // make it's free
     s.used = false
