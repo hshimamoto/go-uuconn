@@ -107,6 +107,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     ackq := make(chan bool, 32)
     ticker := time.NewTicker(time.Second)
     lastrecv := time.Now().Add(time.Minute)
+    keepalive := time.Now().Add(10 * time.Second)
     for s.running {
 	if pendingbuf == nil || len(pendingbuf) < 32768 {
 	    select {
@@ -192,9 +193,11 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		}
 	    }
 	    // keep alive
-	    if ackflag == false {
-		ackq <- true
-		ackflag = true
+	    if time.Now().After(keepalive) {
+		if ackflag == false {
+		    ackq <- true
+		    ackflag = true
+		}
 	    }
 	    if time.Now().After(lastrecv) {
 		s.Logf("no activity\n")
@@ -223,6 +226,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    buf := msg.Pack()
 	    queue <- buf
 	    ackflag = false
+	    keepalive = time.Now().Add(10 * time.Second)
 	case <-s.bell:
 	    // ignore
 	}
