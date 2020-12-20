@@ -280,6 +280,13 @@ func (s *Stream)Read(buf []byte) (int, error) {
     if s.recv == nil {
 	s.recv = <-s.recvq
 	s.Tracef("recvq: dequeue %d bytes\n", len(s.recv))
+	if len(s.recv) < len(buf) {
+	    select {
+	    case next := <-s.recvq:
+		s.recv = append(s.recv, next...)
+	    default:
+	    }
+	}
     }
     n := len(buf)
     if n > len(s.recv) {
