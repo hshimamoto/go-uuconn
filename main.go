@@ -320,6 +320,10 @@ func (s *Stream)Read(buf []byte) (int, error) {
 }
 
 func (s *Stream)Write(buf []byte) (int, error) {
+    if s.running == false {
+	// EOF
+	return 0, io.EOF
+    }
     sendbuf := make([]byte, len(buf))
     n := len(buf)
     for i := 0; i < n; i++ {
