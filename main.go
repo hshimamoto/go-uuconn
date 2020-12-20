@@ -184,6 +184,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		ulack = msg.seq0
 		ulseq = ulack
 	    }
+	    // ignore KEEP
 	case <-ticker.C:
 	    // must wait a bit
 	    if time.Now().After(ultime) {
@@ -194,10 +195,15 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    }
 	    // keep alive
 	    if time.Now().After(keepalive) {
-		if ackflag == false {
-		    ackq <- true
-		    ackflag = true
+		keep := &Message{
+		    mtype: MSG_KEEP,
+		    sid: s.sid,
+		    key: s.key,
+		    seq0: 0,
+		    seq1: 0,
 		}
+		queue <- keep.Pack()
+		keepalive = time.Now().Add(10 * time.Second)
 	    }
 	    if time.Now().After(lastrecv) {
 		s.Logf("no activity\n")
@@ -226,7 +232,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    buf := msg.Pack()
 	    queue <- buf
 	    ackflag = false
-	    keepalive = time.Now().Add(10 * time.Second)
 	case <-s.bell:
 	    // ignore
 	}
@@ -304,6 +309,7 @@ type Message struct {
 
 const MSG_DATA	int = 0x44 // Data
 const MSG_ACK	int = 0x41 // Ack
+const MSG_KEEP	int = 0x4B // Keep
 const MSG_OPEN	int = 0x4f // Open
 const MSG_RESET	int = 0x52 // Reset
 const MSG_PROBE	int = 0x50 // Probe
@@ -451,7 +457,7 @@ func (u *UDPconn)Connection() {
 	    }
 	    s := u.streams[sid]
 	    switch msg.mtype {
-	    case MSG_DATA, MSG_ACK:
+	    case MSG_DATA, MSG_ACK, MSG_KEEP:
 		if s.running && msg.key == s.key {
 		    go func() {
 			s.mq <- msg
@@ -483,17 +489,17 @@ func (u *UDPconn)Connection() {
 			u.handler(s, remote)
 		    }
 		}
-		ack := &Message{
-		    mtype: MSG_ACK,
+		keep := &Message{
+		    mtype: MSG_KEEP,
 		    sid: sid,
 		    key: s.key,
 		    seq0: 0,
 		    seq1: 0,
 		}
-		log.Printf("ack OPEN %d %d\n", msg.sid, msg.key)
-		u.queue <- ack.Pack()
-		u.queue <- ack.Pack()
-		u.queue <- ack.Pack()
+		log.Printf("ack for OPEN %d %d by keep\n", msg.sid, msg.key)
+		u.queue <- keep.Pack()
+		u.queue <- keep.Pack()
+		u.queue <- keep.Pack()
 	    case MSG_RESET:
 		log.Printf("recv RESET %d %d\n", msg.sid, msg.key)
 		// close the stream
