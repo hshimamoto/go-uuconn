@@ -151,6 +151,9 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	select {
 	case msg := <-s.mq:
 	    lastrecv = time.Now().Add(time.Minute)
+	    if s.established == false {
+		s.Logf("Established\n")
+	    }
 	    s.established = true
 	    switch msg.mtype {
 	    case MSG_DATA:
@@ -438,19 +441,19 @@ func (u *UDPconn)Connection() {
 			    sid: sid,
 			}
 			u.queue <- msg.Pack()
+			break
 		    }
-		    // just ignore
-		    break
-		}
-		// start new stream
-		s.Init(msg.key)
-		s.used = true
-		s.established = true // server side
-		s.StartRunner(u.queue)
-		// call handler
-		if u.handler != nil {
-		    remote := string(msg.data)
-		    u.handler(s, remote)
+		} else {
+		    // start new stream
+		    s.Init(msg.key)
+		    s.used = true
+		    s.established = true // server side
+		    s.StartRunner(u.queue)
+		    // call handler
+		    if u.handler != nil {
+			remote := string(msg.data)
+			u.handler(s, remote)
+		    }
 		}
 		ack := &Message{
 		    mtype: MSG_ACK,
@@ -459,6 +462,7 @@ func (u *UDPconn)Connection() {
 		    seq0: 0,
 		    seq1: 0,
 		}
+		log.Printf("ack OPEN %d %d\n", msg.sid, msg.key)
 		u.queue <- ack.Pack()
 		u.queue <- ack.Pack()
 		u.queue <- ack.Pack()
