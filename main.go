@@ -459,9 +459,7 @@ func (u *UDPconn)Connection() {
 	    switch msg.mtype {
 	    case MSG_DATA, MSG_ACK, MSG_KEEP:
 		if s.running && msg.key == s.key {
-		    go func() {
-			s.mq <- msg
-		    }()
+		    s.mq <- msg
 		}
 	    case MSG_OPEN:
 		log.Printf("recv OPEN %d %d\n", msg.sid, msg.key)
