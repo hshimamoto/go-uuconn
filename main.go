@@ -426,7 +426,7 @@ func (u *UDPconn)Connection() {
 	    s := u.streams[sid]
 	    switch msg.mtype {
 	    case MSG_DATA, MSG_ACK:
-		if msg.key == s.key {
+		if s.running && msg.key == s.key {
 		    go func() {
 			s.mq <- msg
 		    }()
