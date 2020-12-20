@@ -74,14 +74,14 @@ func (s *Stream)Tracef(fmt string, a ...interface{}) {
     args := make([]interface{}, len(a) + 1)
     args[0] = s.sid
     copy(args[1:], a)
-    log.Tracef("[%d]" + fmt, args...)
+    log.Tracef("[%d] " + fmt, args...)
 }
 
 func (s *Stream)Logf(fmt string, a ...interface{}) {
     args := make([]interface{}, len(a) + 1)
     args[0] = s.sid
     copy(args[1:], a)
-    log.Infof("[%d]" + fmt, args...)
+    log.Infof("[%d] " + fmt, args...)
 }
 
 func (s *Stream)Runner(queue chan<- []byte) {
@@ -494,8 +494,12 @@ func (u *UDPconn)Connect() {
 
 func (u *UDPconn)OpenStream(remote string) *Stream {
     s := u.AllocStream(-1)
+    if s == nil {
+	log.Printf("OpenStream: no slot\n")
+	return s
+    }
     s.Init(rand.Intn(65536))
-    log.Printf("[sid:%d key:%d]try to open %s\n", s.sid, s.key, remote)
+    log.Printf("[sid:%d key:%d] try to open %s\n", s.sid, s.key, remote)
     s.StartRunner(u.queue)
     for i := 0; i < 10; i++ {
 	msg := &Message{
@@ -508,12 +512,17 @@ func (u *UDPconn)OpenStream(remote string) *Stream {
 	}
 	u.queue <- msg.Pack()
 	time.Sleep(100 * time.Millisecond)
-	if !s.running || s.established {
+	if !s.running {
+	    log.Printf("[sid:%d key:%d] stop running\n", s.sid, s.key)
+	    break
+	}
+	if s.established {
+	    log.Printf("[sid:%d key:%d] established\n", s.sid, s.key)
 	    break
 	}
     }
     if !s.established {
-	log.Printf("failed to open")
+	log.Printf("[sid:%d key:%d] failed to open\n", s.sid, s.key)
 	return nil
     }
     return s
