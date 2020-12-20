@@ -77,6 +77,13 @@ func (s *Stream)Tracef(fmt string, a ...interface{}) {
     log.Tracef("[%d] " + fmt, args...)
 }
 
+func (s *Stream)Debugf(fmt string, a ...interface{}) {
+    args := make([]interface{}, len(a) + 1)
+    args[0] = s.sid
+    copy(args[1:], a)
+    log.Debugf("[%d] " + fmt, args...)
+}
+
 func (s *Stream)Logf(fmt string, a ...interface{}) {
     args := make([]interface{}, len(a) + 1)
     args[0] = s.sid
@@ -220,12 +227,27 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    // ignore
 	}
     }
-    go func() {
-	time.Sleep(time.Minute)
-	// make it's free
-	s.used = false
-	log.Printf("stream %d is now free\n", s.sid)
-    }()
+    // clear queue
+    s.key = -1
+    empty := false
+    cnt := 0
+    for !empty {
+	select {
+	case <-s.mq:
+	    cnt++
+	case <-s.sendq:
+	    cnt++
+	case <-s.bell:
+	    cnt++
+	default:
+	    empty = true
+	}
+    }
+    s.Debugf("discard %d items\n", cnt)
+    time.Sleep(time.Minute)
+    // make it's free
+    s.used = false
+    log.Printf("stream %d is now free\n", s.sid)
 }
 
 func (s *Stream)StartRunner(queue chan<- []byte) {
