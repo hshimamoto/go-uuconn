@@ -277,15 +277,29 @@ func (s *Stream)StartRunner(queue chan<- []byte) {
 }
 
 func (s *Stream)Read(buf []byte) (int, error) {
-    if s.recv == nil {
-	s.recv = <-s.recvq
-	s.Tracef("recvq: dequeue %d bytes\n", len(s.recv))
-	if len(s.recv) < len(buf) {
-	    select {
-	    case next := <-s.recvq:
-		s.recv = append(s.recv, next...)
-	    default:
+    for s.recv == nil {
+	next := []byte(nil)
+	select {
+	case next = <-s.recvq:
+	default:
+	    if s.running == false {
+		// EOF
+		return 0, io.EOF
 	    }
+	    // wait recv
+	    next = <-s.recvq
+	}
+	s.recv = next
+	if s.recv != nil {
+	    s.Tracef("recvq: dequeue %d bytes\n", len(s.recv))
+	}
+    }
+    // try to recv more
+    if len(s.recv) < len(buf) {
+	select {
+	case next := <-s.recvq:
+	    s.recv = append(s.recv, next...)
+	default:
 	}
     }
     n := len(buf)
