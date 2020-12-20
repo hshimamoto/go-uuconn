@@ -139,7 +139,8 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	}
 	offset := 0
 	if ulptr != lastseq {
-	    ultime = time.Now().Add(500 * time.Millisecond)
+	    ultime = time.Now().Add(250 * time.Millisecond)
+	    ticker.Reset(100 * time.Millisecond)
 	}
 	for ulptr != lastseq {
 	    datalen := ((lastseq + 65536) - ulptr) % 65536
@@ -221,6 +222,9 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		s.Logf("no activity\n")
 		// close stream
 		s.running = false
+	    }
+	    if ulack == lastseq {
+		ticker.Reset(time.Second)
 	    }
 	case <-ackq:
 	    // dequeue all
