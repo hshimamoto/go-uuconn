@@ -412,13 +412,17 @@ type UDPconn struct {
 func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
     log.Debugf("NewUDPConn: %s %s\n", laddr, raddr)
     u := &UDPconn{}
-    addr, err := net.ResolveUDPAddr("udp", raddr)
-    if err != nil {
-	return nil, err
+    u.addr = nil
+    if raddr != "" {
+	addr, err := net.ResolveUDPAddr("udp", raddr)
+	if err != nil {
+	    return nil, err
+	}
+	u.addr = addr
     }
-    u.addr = addr
-    addr = nil
+    var addr *net.UDPAddr = nil
     if laddr != "" {
+	var err error
 	addr, err = net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
 	    return nil, err
@@ -580,22 +584,6 @@ func (u *UDPconn)Connect() {
     u.running = true
     u.connected = false
     go u.Receiver()
-    // connect
-    go func() {
-	cnt := 0
-	for u.connected == false {
-	    u.conn.WriteToUDP([]byte("Probe"), u.addr)
-	    time.Sleep(200 * time.Millisecond)
-	    cnt++
-	    if cnt % 10 == 0 {
-		time.Sleep(time.Second)
-	    }
-	}
-	// start sender
-	go u.Sender()
-	// start connection
-	go u.Connection()
-    }()
 }
 
 func (u *UDPconn)OpenStream(remote string) *Stream {
@@ -912,6 +900,32 @@ func do_api(u *UDPconn, request string) {
 	buf := make([]byte, 1500)
 	n, _, _ := u.conn.ReadFromUDP(buf)
 	fmt.Printf("Remote %s\n", string(buf[:n]))
+    case "CONNECT":
+	if u.connected {
+	    log.Infof("already connected to %s\n", u.addr)
+	    return
+	}
+	raddr := strings.TrimSpace(reqs[1])
+	addr, err := net.ResolveUDPAddr("udp", raddr)
+	if err != nil {
+	    return
+	}
+	u.addr = addr
+	go func() {
+	    cnt := 0
+	    for u.connected == false {
+		u.conn.WriteToUDP([]byte("Probe"), u.addr)
+		time.Sleep(200 * time.Millisecond)
+		cnt++
+		if cnt % 10 == 0 {
+		    time.Sleep(time.Second)
+		}
+	    }
+	    // start sender
+	    go u.Sender()
+	    // start connection
+	    go u.Connection()
+	}()
     case "ADD":
 	if len(reqs) != 3 {
 	    log.Infof("Bad request: %s\n", request)
@@ -944,9 +958,9 @@ func api_handler(u *UDPconn, conn net.Conn) {
     do_api(u, request)
 }
 
-func client(raddr, listen string, reqs []string) {
+func client(listen string, reqs []string) {
     log.Debugf("start client\n")
-    u, err := NewUDPConn("", raddr)
+    u, err := NewUDPConn("", "")
     if err != nil {
 	log.Printf("NewUDPConn: %v\n", err)
 	return
@@ -1027,16 +1041,16 @@ func main() {
 	server(args[0], args[1])
 	return
     case "client":
-	if len(args) < 2 {
-	    fmt.Println("uuconn client raddr listen")
+	if len(args) < 1 {
+	    fmt.Println("uuconn client listen")
 	    return
 	}
 	reqs := []string{}
-	if len(args) > 2 {
-	    reqs = args[2:]
+	if len(args) > 1 {
+	    reqs = args[1:]
 	}
 	log.Infof("%v", reqs)
-	client(args[0], args[1], reqs)
+	client(args[0], reqs)
 	return
     }
 }
