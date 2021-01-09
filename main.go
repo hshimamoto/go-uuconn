@@ -8,6 +8,7 @@ import (
     "math/rand"
     "net"
     "os"
+    "sync"
     "time"
 
     log "github.com/sirupsen/logrus"
@@ -403,6 +404,8 @@ type UDPconn struct {
     streams []*Stream
     nr_streams int
     handler func(s *Stream, remote string)
+    //
+    mtx sync.Mutex
 }
 
 func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
@@ -433,6 +436,8 @@ func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
 }
 
 func (u *UDPconn)AllocStream(n int) *Stream {
+    u.mtx.Lock()
+    defer u.mtx.Unlock()
     if n < 0 {
 	for _, s := range u.streams {
 	    if s.used {
