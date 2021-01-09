@@ -919,7 +919,7 @@ func api_handler(u *UDPconn, conn net.Conn) {
     do_api(u, request)
 }
 
-func client(laddr, raddr, listen string) {
+func client(laddr, raddr, listen string, reqs []string) {
     u, err := NewUDPConn(laddr, raddr)
     if err != nil {
 	log.Printf("NewUDPConn: %v\n", err)
@@ -937,6 +937,13 @@ func client(laddr, raddr, listen string) {
 	log.Infof("failed to start listening on %s\n", listen)
 	return
     }
+    // put request on start up
+    go func() {
+	time.Sleep(200 * time.Millisecond)
+	for _, r := range reqs {
+	    do_api(u, r)
+	}
+    }()
     log.Printf("start listening on %s\n", listen)
     serv.Run()
 }
@@ -997,7 +1004,11 @@ func main() {
 	    fmt.Println("uuconn client laddr raddr listen")
 	    return
 	}
-	client(args[0], args[1], args[2])
+	reqs := []string{}
+	if len(args) > 3 {
+	    reqs = args[3:]
+	}
+	client(args[0], args[1], args[2], reqs)
 	return
     }
 }
