@@ -873,46 +873,63 @@ func client(laddr, raddr, listen, remote string) {
     serv.Run()
 }
 
+func usage() {
+    fmt.Println("uuconn command options...")
+    os.Exit(1)
+}
+
 func main() {
     f, _ := os.Create("uuconn.log")
+    args := os.Args
+    if len(args) == 1 {
+	usage()
+    }
+
     log.SetFormatter(&log.JSONFormatter{TimestampFormat:"2006-01-02 15:04:05.000000"})
-    mw := io.MultiWriter(os.Stderr, f)
-    log.SetOutput(mw)
-    log.SetLevel(log.DebugLevel)
+    if args[1] == "-v" {
+	args = args[1:]
+	mw := io.MultiWriter(os.Stderr, f)
+	log.SetOutput(mw)
+	log.SetLevel(log.DebugLevel)
+    } else {
+	log.SetOutput(f)
+	log.SetLevel(log.InfoLevel)
+    }
+
+    if len(args) < 2 {
+	usage()
+    }
+
     log.Println("start")
+    defer log.Println("end")
     rand.Seed(time.Now().Unix())
     // uuconn command options
-    if len(os.Args) < 3 {
-	log.Println("uuconn command options...")
-	return
-    }
-    cmd := os.Args[1]
-    args := os.Args[2:]
+    cmd := args[1]
+    args = args[2:]
     switch cmd {
     case "checker":
 	checker(args[0])
 	return
     case "check":
 	if len(args) < 2 {
-	    log.Println("uuconn check laddr checker")
+	    fmt.Println("uuconn check laddr checker")
 	    return
 	}
 	check(args[0], args[1])
 	return
     case "server":
 	if len(args) < 2 {
-	    log.Println("uuconn server laddr raddr")
+	    fmt.Println("uuconn server laddr raddr")
 	    return
 	}
 	server(args[0], args[1])
 	return
     case "client":
 	if len(args) < 3 {
-	    log.Println("uuconn client laddr raddr listen")
+	    fmt.Println("uuconn client laddr raddr listen")
 	    return
 	}
 	client(args[0], args[1], args[2], args[3])
 	return
     }
-    log.Println("end")
 }
