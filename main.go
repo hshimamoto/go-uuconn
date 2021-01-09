@@ -800,19 +800,15 @@ func dummy_stream(u *UDPconn) {
     }
 }
 
-func client(laddr, raddr, listen, remote string) {
-    u, err := NewUDPConn(laddr, raddr)
-    if err != nil {
-	log.Printf("NewUDPConn: %v\n", err)
-	return
-    }
-    u.Connect()
-    time.Sleep(100 * time.Millisecond)
-    //
-    //go dummy_stream(u)
-    // start listening
+type LocalServer struct {
+    u *UDPconn
+    serv *session.Server
+}
+
+func NewLocalServer(u *UDPconn, listen, remote string) (*LocalServer, error) {
+    ls := &LocalServer{ u: u }
     serv, err := session.NewServer(listen, func(conn net.Conn) {
-	log.Printf("accepted\n")
+	log.Infof("accepted\n")
 	defer conn.Close()
 	s := u.OpenStream(remote)
 	for i := 0; i < 10; i++ {
@@ -874,6 +870,33 @@ func client(laddr, raddr, listen, remote string) {
 	// wait a bit before closing conn
 	time.Sleep(time.Second)
     })
+    if err != nil {
+	return nil, err
+    }
+    ls.serv = serv
+    return ls, nil
+}
+
+func (ls *LocalServer)Run() {
+    ls.serv.Run()
+}
+
+func client(laddr, raddr, listen, remote string) {
+    u, err := NewUDPConn(laddr, raddr)
+    if err != nil {
+	log.Printf("NewUDPConn: %v\n", err)
+	return
+    }
+    u.Connect()
+    time.Sleep(100 * time.Millisecond)
+    //
+    //go dummy_stream(u)
+    // start listening
+    serv, err := NewLocalServer(u, listen, remote)
+    if err != nil {
+	log.Infof("failed to start listening on %s\n", listen)
+	return
+    }
     log.Printf("start listening on %s\n", listen)
     serv.Run()
 }
