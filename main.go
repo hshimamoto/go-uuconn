@@ -9,6 +9,7 @@ import (
     "net"
     "os"
     "sync"
+    "strings"
     "time"
 
     log "github.com/sirupsen/logrus"
@@ -881,7 +882,44 @@ func (ls *LocalServer)Run() {
     ls.serv.Run()
 }
 
-func client(laddr, raddr, listen, remote string) {
+func do_api(u *UDPconn, request string) {
+    request = strings.TrimSpace(request)
+    reqs := strings.Split(request, " ")
+    cmd := strings.TrimSpace(reqs[0])
+    switch cmd {
+    case "ADD":
+	if len(reqs) != 3 {
+	    log.Infof("Bad request: %s\n", request)
+	    return
+	}
+	listen := strings.TrimSpace(reqs[1])
+	remote := strings.TrimSpace(reqs[2])
+	serv, err := NewLocalServer(u, listen, remote)
+	if err != nil {
+	    log.Infof("failed to start listening on %s\n", listen)
+	    return
+	}
+	log.Infof("start listening on %s\n", listen)
+	go serv.Run()
+    default:
+	log.Infof("Unknown API Command: %s\n", cmd)
+    }
+}
+
+func api_handler(u *UDPconn, conn net.Conn) {
+    log.Infof("API handler\n")
+    defer conn.Close()
+    buf := make([]byte, 1024)
+    n, err := conn.Read(buf)
+    if err != nil {
+	return
+    }
+    // use only 1st line
+    request := strings.Split(string(buf[:n]), "\n")[0]
+    do_api(u, request)
+}
+
+func client(laddr, raddr, listen string) {
     u, err := NewUDPConn(laddr, raddr)
     if err != nil {
 	log.Printf("NewUDPConn: %v\n", err)
@@ -892,7 +930,9 @@ func client(laddr, raddr, listen, remote string) {
     //
     //go dummy_stream(u)
     // start listening
-    serv, err := NewLocalServer(u, listen, remote)
+    serv, err := session.NewServer(listen, func(conn net.Conn) {
+	api_handler(u, conn)
+    })
     if err != nil {
 	log.Infof("failed to start listening on %s\n", listen)
 	return
@@ -957,7 +997,7 @@ func main() {
 	    fmt.Println("uuconn client laddr raddr listen")
 	    return
 	}
-	client(args[0], args[1], args[2], args[3])
+	client(args[0], args[1], args[2])
 	return
     }
 }
