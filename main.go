@@ -700,8 +700,8 @@ func start_dummy_server(s *Stream) {
     }()
 }
 
-func server(laddr, raddr string) {
-    u, err := NewUDPConn(laddr, raddr)
+func server(listen string, reqs []string) {
+    u, err := NewUDPConn("", "")
     if err != nil {
 	log.Printf("NewUDPConn: %v\n", err)
 	return
@@ -766,9 +766,23 @@ func server(laddr, raddr string) {
 	    conn.Close()
 	}()
     }
-    for u.running {
-	time.Sleep(time.Second)
+    // start listening
+    serv, err := session.NewServer(listen, func(conn net.Conn) {
+	api_handler(u, conn)
+    })
+    if err != nil {
+	log.Infof("failed to start listening on %s\n", listen)
+	return
     }
+    // put request on start up
+    go func() {
+	time.Sleep(200 * time.Millisecond)
+	for _, r := range reqs {
+	    do_api(u, r)
+	}
+    }()
+    log.Printf("start listening on %s\n", listen)
+    serv.Run()
 }
 
 func dummy_stream(u *UDPconn) {
@@ -1034,11 +1048,16 @@ func main() {
 	check(args[0], args[1])
 	return
     case "server":
-	if len(args) < 2 {
-	    fmt.Println("uuconn server laddr raddr")
+	if len(args) < 1 {
+	    fmt.Println("uuconn server listen")
 	    return
 	}
-	server(args[0], args[1])
+	reqs := []string{}
+	if len(args) > 1 {
+	    reqs = args[1:]
+	}
+	log.Infof("%v", reqs)
+	server(args[0], reqs)
 	return
     case "client":
 	if len(args) < 1 {
