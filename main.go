@@ -410,15 +410,19 @@ type UDPconn struct {
 }
 
 func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
+    log.Debugf("NewUDPConn: %s %s\n", laddr, raddr)
     u := &UDPconn{}
     addr, err := net.ResolveUDPAddr("udp", raddr)
     if err != nil {
 	return nil, err
     }
     u.addr = addr
-    addr, err = net.ResolveUDPAddr("udp", laddr)
-    if err != nil {
-	return nil, err
+    addr = nil
+    if laddr != "" {
+	addr, err = net.ResolveUDPAddr("udp", laddr)
+	if err != nil {
+	    return nil, err
+	}
     }
     conn, err := net.ListenUDP("udp", addr)
     if err != nil {
@@ -473,6 +477,10 @@ func (u *UDPconn)Receiver() {
 	    continue
 	}
 	if addr.String() != u.addr.String() {
+	    if buf[0] == 0x50 { // 'P'robe
+		log.Printf("read from %s %s\n", addr.String(), string(buf[:n]))
+		fmt.Printf("Remote %s\n", string(buf[:n]))
+	    }
 	    continue
 	}
 	if u.connected == false {
@@ -573,19 +581,21 @@ func (u *UDPconn)Connect() {
     u.connected = false
     go u.Receiver()
     // connect
-    cnt := 0
-    for u.connected == false {
-	u.conn.WriteToUDP([]byte("Probe"), u.addr)
-	time.Sleep(200 * time.Millisecond)
-	cnt++
-	if cnt % 10 == 0 {
-	    time.Sleep(time.Second)
+    go func() {
+	cnt := 0
+	for u.connected == false {
+	    u.conn.WriteToUDP([]byte("Probe"), u.addr)
+	    time.Sleep(200 * time.Millisecond)
+	    cnt++
+	    if cnt % 10 == 0 {
+		time.Sleep(time.Second)
+	    }
 	}
-    }
-    // start sender
-    go u.Sender()
-    // start connection
-    go u.Connection()
+	// start sender
+	go u.Sender()
+	// start connection
+	go u.Connection()
+    }()
 }
 
 func (u *UDPconn)OpenStream(remote string) *Stream {
@@ -887,6 +897,21 @@ func do_api(u *UDPconn, request string) {
     reqs := strings.Split(request, " ")
     cmd := strings.TrimSpace(reqs[0])
     switch cmd {
+    case "CHECK":
+	if len(reqs) != 2 {
+	    log.Infof("Bad request: %s\n", request)
+	    return
+	}
+	raddr := strings.TrimSpace(reqs[1])
+	addr, err := net.ResolveUDPAddr("udp", raddr)
+	if err != nil {
+	    log.Printf("ResolveUDPAddr: %v\n", err)
+	    return
+	}
+	u.conn.WriteToUDP([]byte("Probe"), addr)
+	buf := make([]byte, 1500)
+	n, _, _ := u.conn.ReadFromUDP(buf)
+	fmt.Printf("Remote %s\n", string(buf[:n]))
     case "ADD":
 	if len(reqs) != 3 {
 	    log.Infof("Bad request: %s\n", request)
@@ -919,12 +944,14 @@ func api_handler(u *UDPconn, conn net.Conn) {
     do_api(u, request)
 }
 
-func client(laddr, raddr, listen string, reqs []string) {
-    u, err := NewUDPConn(laddr, raddr)
+func client(raddr, listen string, reqs []string) {
+    log.Debugf("start client\n")
+    u, err := NewUDPConn("", raddr)
     if err != nil {
 	log.Printf("NewUDPConn: %v\n", err)
 	return
     }
+    log.Debugf("start connecting\n")
     u.Connect()
     time.Sleep(100 * time.Millisecond)
     //
@@ -1000,15 +1027,16 @@ func main() {
 	server(args[0], args[1])
 	return
     case "client":
-	if len(args) < 3 {
-	    fmt.Println("uuconn client laddr raddr listen")
+	if len(args) < 2 {
+	    fmt.Println("uuconn client raddr listen")
 	    return
 	}
 	reqs := []string{}
-	if len(args) > 3 {
-	    reqs = args[3:]
+	if len(args) > 2 {
+	    reqs = args[2:]
 	}
-	client(args[0], args[1], args[2], reqs)
+	log.Infof("%v", reqs)
+	client(args[0], args[1], reqs)
 	return
     }
 }
