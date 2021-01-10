@@ -405,6 +405,7 @@ type UDPconn struct {
     streams []*Stream
     nr_streams int
     handler func(s *Stream, remote string)
+    api_resp chan string
     //
     mtx sync.Mutex
 }
@@ -441,6 +442,7 @@ func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
 	u.streams[i] = NewStream(i, 65536)
     }
     u.handler = nil
+    u.api_resp = nil
     return u, err
 }
 
@@ -484,6 +486,10 @@ func (u *UDPconn)Receiver() {
 	    if buf[0] == 0x50 { // 'P'robe
 		log.Printf("read from %s %s\n", addr.String(), string(buf[:n]))
 		fmt.Printf("Remote %s\n", string(buf[:n]))
+		resp := u.api_resp
+		if resp != nil {
+		    resp <- string(buf[:n])
+		}
 	    }
 	    continue
 	}
@@ -778,7 +784,7 @@ func server(listen string, reqs []string) {
     go func() {
 	time.Sleep(200 * time.Millisecond)
 	for _, r := range reqs {
-	    do_api(u, r)
+	    do_api(nil, u, r)
 	}
     }()
     log.Printf("start listening on %s\n", listen)
@@ -894,7 +900,7 @@ func (ls *LocalServer)Run() {
     ls.serv.Run()
 }
 
-func do_api(u *UDPconn, request string) {
+func do_api(conn net.Conn, u *UDPconn, request string) {
     request = strings.TrimSpace(request)
     reqs := strings.Split(request, " ")
     cmd := strings.TrimSpace(reqs[0])
@@ -910,7 +916,17 @@ func do_api(u *UDPconn, request string) {
 	    log.Printf("ResolveUDPAddr: %v\n", err)
 	    return
 	}
-	u.conn.WriteToUDP([]byte("Probe"), addr)
+	if conn != nil {
+	    resp := make(chan string, 32)
+	    u.api_resp = resp
+	    u.conn.WriteToUDP([]byte("Probe"), addr)
+	    select {
+	    case s := <-resp:
+		conn.Write([]byte(s))
+	    case <-time.After(time.Second):
+	    }
+	    u.api_resp = nil
+	}
     case "CONNECT":
 	if u.connected {
 	    log.Infof("already connected to %s\n", u.addr)
@@ -966,7 +982,7 @@ func api_handler(u *UDPconn, conn net.Conn) {
     }
     // use only 1st line
     request := strings.Split(string(buf[:n]), "\n")[0]
-    do_api(u, request)
+    do_api(conn, u, request)
 }
 
 func client(listen string, reqs []string) {
@@ -993,7 +1009,7 @@ func client(listen string, reqs []string) {
     go func() {
 	time.Sleep(200 * time.Millisecond)
 	for _, r := range reqs {
-	    do_api(u, r)
+	    do_api(nil, u, r)
 	}
     }()
     log.Printf("start listening on %s\n", listen)
