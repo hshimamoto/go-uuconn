@@ -397,11 +397,24 @@ func ParseMessage(buf []byte) *Message {
 
 type UDPremote struct {
     addr *net.UDPAddr
+    raddr string
     live bool
 }
 
+func NewUDPremote(raddr string) (*UDPremote, error) {
+    addr, err := net.ResolveUDPAddr("udp", raddr)
+    if err != nil {
+	return nil, err
+    }
+    r := &UDPremote{}
+    r.addr = addr
+    r.raddr = addr.String()
+    r.live = false
+    return r, nil
+}
+
 func (r *UDPremote)String() string {
-    return r.addr.String()
+    return r.raddr
 }
 
 type UDPconn struct {
@@ -942,12 +955,12 @@ func do_api(conn net.Conn, u *UDPconn, request string) {
 	    return
 	}
 	raddr := strings.TrimSpace(reqs[1])
-	addr, err := net.ResolveUDPAddr("udp", raddr)
+	remote, err := NewUDPremote(raddr)
 	if err != nil {
 	    return
 	}
 	// check in remote
-	raddr = addr.String()
+	raddr = remote.String()
 	for _, r := range u.remotes {
 	    if r.String() == raddr {
 		// already have
@@ -955,13 +968,11 @@ func do_api(conn net.Conn, u *UDPconn, request string) {
 		return
 	    }
 	}
-	r := &UDPremote{}
-	r.addr = addr
-	u.remotes = append(u.remotes, r)
+	u.remotes = append(u.remotes, remote)
 	go func() {
 	    cnt := 0
 	    for u.connected == false {
-		u.conn.WriteToUDP([]byte("Probe"), addr)
+		u.conn.WriteToUDP([]byte("Probe"), remote.addr)
 		time.Sleep(200 * time.Millisecond)
 		cnt++
 		if cnt % 10 == 0 {
