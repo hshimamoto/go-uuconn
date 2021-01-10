@@ -410,26 +410,10 @@ type UDPconn struct {
     mtx sync.Mutex
 }
 
-func NewUDPConn(laddr, raddr string) (*UDPconn, error) {
-    log.Debugf("NewUDPConn: %s %s\n", laddr, raddr)
+func NewUDPConn() (*UDPconn, error) {
     u := &UDPconn{}
     u.addr = nil
-    if raddr != "" {
-	addr, err := net.ResolveUDPAddr("udp", raddr)
-	if err != nil {
-	    return nil, err
-	}
-	u.addr = addr
-    }
-    var addr *net.UDPAddr = nil
-    if laddr != "" {
-	var err error
-	addr, err = net.ResolveUDPAddr("udp", laddr)
-	if err != nil {
-	    return nil, err
-	}
-    }
-    conn, err := net.ListenUDP("udp", addr)
+    conn, err := net.ListenUDP("udp", nil)
     if err != nil {
 	return nil, err
     }
@@ -707,7 +691,7 @@ func start_dummy_server(s *Stream) {
 }
 
 func server(listen string, reqs []string) {
-    u, err := NewUDPConn("", "")
+    u, err := NewUDPConn()
     if err != nil {
 	log.Printf("NewUDPConn: %v\n", err)
 	return
@@ -987,7 +971,7 @@ func api_handler(u *UDPconn, conn net.Conn) {
 
 func client(listen string, reqs []string) {
     log.Debugf("start client\n")
-    u, err := NewUDPConn("", "")
+    u, err := NewUDPConn()
     if err != nil {
 	log.Printf("NewUDPConn: %v\n", err)
 	return
