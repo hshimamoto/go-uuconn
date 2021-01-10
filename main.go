@@ -369,6 +369,7 @@ const MSG_KEEP	int = 0x4B // Keep
 const MSG_OPEN	int = 0x4f // Open
 const MSG_RESET	int = 0x52 // Reset
 const MSG_PROBE	int = 0x50 // Probe
+const MSG_probe	int = 0x70 // probe
 
 func (m *Message)Pack() []byte {
     datalen := len(m.data)
@@ -387,6 +388,9 @@ func ParseMessage(buf []byte) *Message {
     msg := &Message{}
     msg.mtype = int(buf[0])
     msg.sid = int(buf[1])
+    if len(buf) < 8 {
+	return msg
+    }
     msg.key = int(binary.LittleEndian.Uint16(buf[2:]))
     msg.seq0 = int(binary.LittleEndian.Uint16(buf[4:]))
     msg.seq1 = int(binary.LittleEndian.Uint16(buf[6:]))
@@ -399,6 +403,70 @@ type UDPremote struct {
     addr *net.UDPAddr
     raddr string
     live bool
+    running bool
+    connected bool
+    queue chan []byte
+    mq chan *Message
+    streams []*Stream
+    nr_streams int
+    handler func(s *Stream, remote string)
+    mtx sync.Mutex
+}
+
+func remote_handler(s *Stream, remote string) {
+    log.Printf("[sid:%d key:%d]New stream for %s\n", s.sid, s.key, remote)
+    // try to connect local
+    conn, err := session.Dial(remote)
+    if err != nil {
+	s.Logf("Dial error %v\n", err)
+	return
+    }
+    // conn will be closed in writer side
+    // reader side
+    go func() {
+	buf := make([]byte, RDWRSZ)
+	for s.running {
+	    n, _ := s.Read(buf)
+	    out := buf[:n]
+	    o := 0
+	    for n > 0 {
+		w, err := conn.Write(out[o:])
+		if err != nil {
+		    s.Logf("remote write error %v\n", err)
+		    break
+		}
+		o += w
+		n -= w
+	    }
+	    if n > 0 {
+		break
+	    }
+	}
+	s.Logf("try to stop stream (reader side)\n")
+	s.running = false
+    }()
+    // writer side
+    go func() {
+	buf := make([]byte, RDWRSZ)
+	for s.running {
+	    n, err := conn.Read(buf)
+	    if err != nil {
+		s.Logf("remote read error %v\n", err)
+		break
+	    }
+	    if n == 0 {
+		s.Logf("remote conn closed\n")
+		break
+	    }
+	    // push it to stream
+	    s.Write(buf[:n])
+	}
+	s.Logf("try to stop stream (writer side)\n")
+	s.running = false
+	// wait a bit before closing conn
+	time.Sleep(time.Second)
+	conn.Close()
+    }()
 }
 
 func NewUDPremote(raddr string) (*UDPremote, error) {
@@ -410,6 +478,15 @@ func NewUDPremote(raddr string) (*UDPremote, error) {
     r.addr = addr
     r.raddr = addr.String()
     r.live = false
+    r.running = false
+    r.queue = make(chan []byte, 32)
+    r.mq = make(chan *Message, 32)
+    r.nr_streams = 64
+    r.streams = make([]*Stream, r.nr_streams)
+    for i, _ := range r.streams {
+	r.streams[i] = NewStream(i, 65536)
+    }
+    r.handler = remote_handler
     return r, nil
 }
 
@@ -417,19 +494,177 @@ func (r *UDPremote)String() string {
     return r.raddr
 }
 
+func (r *UDPremote)AllocStream(n int) *Stream {
+    r.mtx.Lock()
+    defer r.mtx.Unlock()
+    if n < 0 {
+	for _, s := range r.streams {
+	    if s.used {
+		continue
+	    }
+	    // mark it
+	    s.used = true
+	    return s
+	}
+    } else {
+	if n >= r.nr_streams {
+	    return nil
+	}
+	s := r.streams[n]
+	if s.used {
+	    return nil
+	}
+	// mark it
+	s.used = true
+	return s
+    }
+    return nil
+}
+
+func (r *UDPremote)OpenStream(remote string) *Stream {
+    s := r.AllocStream(-1)
+    if s == nil {
+	log.Printf("OpenStream: no slot\n")
+	return s
+    }
+    s.Init(rand.Intn(65536))
+    log.Printf("[sid:%d key:%d] try to open %s\n", s.sid, s.key, remote)
+    s.StartRunner(r.queue)
+    for i := 0; i < 10; i++ {
+	msg := &Message{
+	    mtype: MSG_OPEN,
+	    sid: s.sid,
+	    key: s.key,
+	    seq0: len(remote),
+	    seq1: len(remote),
+	    data: []byte(remote),
+	}
+	r.queue <- msg.Pack()
+	time.Sleep(100 * time.Millisecond)
+	if !s.running {
+	    log.Printf("[sid:%d key:%d] stop running\n", s.sid, s.key)
+	    break
+	}
+	if s.established {
+	    log.Printf("[sid:%d key:%d] established\n", s.sid, s.key)
+	    break
+	}
+    }
+    if !s.established {
+	log.Printf("[sid:%d key:%d] failed to open\n", s.sid, s.key)
+	// stopping
+	s.running = false
+	return nil
+    }
+    return s
+}
+
+func (r *UDPremote)Sender(queue chan *SendToPair) {
+    log.Infof("start remote Sender\n")
+    ticker := time.NewTicker(10 * time.Second)
+    for r.running {
+	select {
+	case buf := <-r.queue:
+	    pair := &SendToPair{
+		addr: r.addr,
+		data: buf,
+	    }
+	    queue <- pair
+	case <-ticker.C:
+	    pair := &SendToPair{
+		addr: r.addr,
+		data: []byte("Probe"),
+	    }
+	    queue <- pair
+	}
+    }
+}
+
+func (r *UDPremote)Receiver() {
+    log.Infof("start remote Receiver\n")
+    for r.running {
+	select {
+	case msg := <-r.mq:
+	    if r.connected == false {
+		log.Printf("connected with xxx\n")
+		r.connected = true
+	    }
+	    // probe?
+	    switch msg.mtype {
+	    case MSG_PROBE:
+		r.queue <- []byte("probe")
+		break
+	    case MSG_probe:
+		break
+	    }
+	    sid := msg.sid
+	    if sid < 0 || sid >= r.nr_streams {
+		break
+	    }
+	    s := r.streams[sid]
+	    switch msg.mtype {
+	    case MSG_DATA, MSG_ACK, MSG_KEEP:
+		if s.running && msg.key == s.key {
+		    s.mq <- msg
+		}
+	    case MSG_OPEN:
+		log.Printf("recv OPEN %d %d\n", msg.sid, msg.key)
+		// try to allocate s
+		if s.used {
+		    if s.key != msg.key {
+			log.Printf("bad OPEN vs %d\n", s.key)
+			// send back reset
+			msg := &Message{
+			    mtype: MSG_RESET,
+			    sid: sid,
+			}
+			r.queue <- msg.Pack()
+			break
+		    }
+		} else {
+		    // start new stream
+		    s.Init(msg.key)
+		    s.used = true
+		    s.established = true // server side
+		    s.StartRunner(r.queue)
+		    // call handler
+		    if r.handler != nil {
+			remote := string(msg.data)
+			r.handler(s, remote)
+		    }
+		}
+		keep := &Message{
+		    mtype: MSG_KEEP,
+		    sid: sid,
+		    key: s.key,
+		    seq0: 0,
+		    seq1: 0,
+		}
+		log.Printf("ack for OPEN %d %d by keep\n", msg.sid, msg.key)
+		r.queue <- keep.Pack()
+		r.queue <- keep.Pack()
+		r.queue <- keep.Pack()
+	    case MSG_RESET:
+		log.Printf("recv RESET %d %d\n", msg.sid, msg.key)
+		// close the stream
+		s.running = false
+	    }
+	}
+    }
+}
+
+type SendToPair struct {
+    addr *net.UDPAddr
+    data []byte
+}
+
 type UDPconn struct {
     conn *net.UDPConn
     remotes []*UDPremote
     running bool
     connected bool
-    queue chan []byte
-    mq chan *Message
-    streams []*Stream
-    nr_streams int
-    handler func(s *Stream, remote string)
+    queue chan *SendToPair
     api_resp chan string
-    //
-    mtx sync.Mutex
 }
 
 func NewUDPConn() (*UDPconn, error) {
@@ -440,44 +675,11 @@ func NewUDPConn() (*UDPconn, error) {
     }
     u.conn = conn
     u.remotes = []*UDPremote{}
-    u.queue = make(chan []byte, 32)
-    u.mq = make(chan *Message, 32)
-    u.nr_streams = 64
-    u.streams = make([]*Stream, u.nr_streams)
-    for i, _ := range u.streams {
-	u.streams[i] = NewStream(i, 65536)
-    }
-    u.handler = nil
+    u.queue = make(chan *SendToPair, 32)
     u.api_resp = nil
     return u, err
 }
 
-func (u *UDPconn)AllocStream(n int) *Stream {
-    u.mtx.Lock()
-    defer u.mtx.Unlock()
-    if n < 0 {
-	for _, s := range u.streams {
-	    if s.used {
-		continue
-	    }
-	    // mark it
-	    s.used = true
-	    return s
-	}
-    } else {
-	if n >= u.nr_streams {
-	    return nil
-	}
-	s := u.streams[n]
-	if s.used {
-	    return nil
-	}
-	// mark it
-	s.used = true
-	return s
-    }
-    return nil
-}
 
 func (u *UDPconn)Receiver() {
     log.Infof("start Receiver\n")
@@ -505,105 +707,22 @@ func (u *UDPconn)Receiver() {
 		if resp != nil {
 		    resp <- string(buf[:n])
 		}
+		continue
 	    }
-	    continue
-	}
-	if u.connected == false {
-	    log.Printf("connected with %v\n", addr)
-	    u.connected = true
-	    continue
-	}
-	//log.Printf("%d bytes from %v\n", n, addr)
-	if buf[0] == 0x50 { // 'P'robe
-	    // sendback probe
-	    u.queue <- []byte("probe")
-	    continue
-	}
-	if buf[0] == 0x70 { // 'p'robe
+	    log.Debugf("unknown remote %s\n", addr.String())
 	    continue
 	}
 	// parse
 	msg := ParseMessage(buf[:n])
-	u.mq <- msg
+	remote.mq <- msg
     }
 }
 
 func (u *UDPconn)Sender() {
-    ticker := time.NewTicker(10 * time.Second)
-    for u.running {
-	var addr *net.UDPAddr = nil
-	if len(u.remotes) > 0 {
-	    addr = u.remotes[0].addr
-	}
-	select {
-	case buf := <-u.queue:
-	    if addr != nil {
-		u.conn.WriteToUDP(buf, addr)
-	    }
-	case <-ticker.C:
-	    if addr != nil {
-		u.conn.WriteToUDP([]byte("Probe"), addr)
-	    }
-	}
-    }
-}
-
-func (u *UDPconn)Connection() {
     for u.running {
 	select {
-	case msg := <-u.mq:
-	    sid := msg.sid
-	    if sid < 0 || sid >= u.nr_streams {
-		break
-	    }
-	    s := u.streams[sid]
-	    switch msg.mtype {
-	    case MSG_DATA, MSG_ACK, MSG_KEEP:
-		if s.running && msg.key == s.key {
-		    s.mq <- msg
-		}
-	    case MSG_OPEN:
-		log.Printf("recv OPEN %d %d\n", msg.sid, msg.key)
-		// try to allocate s
-		if s.used {
-		    if s.key != msg.key {
-			log.Printf("bad OPEN vs %d\n", s.key)
-			// send back reset
-			msg := &Message{
-			    mtype: MSG_RESET,
-			    sid: sid,
-			}
-			u.queue <- msg.Pack()
-			break
-		    }
-		} else {
-		    // start new stream
-		    s.Init(msg.key)
-		    s.used = true
-		    s.established = true // server side
-		    s.StartRunner(u.queue)
-		    // call handler
-		    if u.handler != nil {
-			remote := string(msg.data)
-			u.handler(s, remote)
-		    }
-		}
-		keep := &Message{
-		    mtype: MSG_KEEP,
-		    sid: sid,
-		    key: s.key,
-		    seq0: 0,
-		    seq1: 0,
-		}
-		log.Printf("ack for OPEN %d %d by keep\n", msg.sid, msg.key)
-		u.queue <- keep.Pack()
-		u.queue <- keep.Pack()
-		u.queue <- keep.Pack()
-	    case MSG_RESET:
-		log.Printf("recv RESET %d %d\n", msg.sid, msg.key)
-		// close the stream
-		s.running = false
-	    }
+	case pair := <-u.queue:
+	    u.conn.WriteToUDP(pair.data, pair.addr)
 	}
     }
 }
@@ -613,44 +732,7 @@ func (u *UDPconn)Connect() {
     u.running = true
     u.connected = false
     go u.Receiver()
-}
-
-func (u *UDPconn)OpenStream(remote string) *Stream {
-    s := u.AllocStream(-1)
-    if s == nil {
-	log.Printf("OpenStream: no slot\n")
-	return s
-    }
-    s.Init(rand.Intn(65536))
-    log.Printf("[sid:%d key:%d] try to open %s\n", s.sid, s.key, remote)
-    s.StartRunner(u.queue)
-    for i := 0; i < 10; i++ {
-	msg := &Message{
-	    mtype: MSG_OPEN,
-	    sid: s.sid,
-	    key: s.key,
-	    seq0: len(remote),
-	    seq1: len(remote),
-	    data: []byte(remote),
-	}
-	u.queue <- msg.Pack()
-	time.Sleep(100 * time.Millisecond)
-	if !s.running {
-	    log.Printf("[sid:%d key:%d] stop running\n", s.sid, s.key)
-	    break
-	}
-	if s.established {
-	    log.Printf("[sid:%d key:%d] established\n", s.sid, s.key)
-	    break
-	}
-    }
-    if !s.established {
-	log.Printf("[sid:%d key:%d] failed to open\n", s.sid, s.key)
-	// stopping
-	s.running = false
-	return nil
-    }
-    return s
+    go u.Sender()
 }
 
 func checker(laddr string) {
@@ -736,65 +818,6 @@ func server(listen string, reqs []string) {
 	return
     }
     u.Connect()
-    u.handler = func(s *Stream, remote string) {
-	log.Printf("[sid:%d key:%d]New stream for %s\n", s.sid, s.key, remote)
-	if remote == "dummy" {
-	    start_dummy_server(s)
-	    return
-	}
-	// try to connect local
-	conn, err := session.Dial(remote)
-	if err != nil {
-	    s.Logf("Dial error %v\n", err)
-	    return
-	}
-	// conn will be closed in writer side
-	// reader side
-	go func() {
-	    buf := make([]byte, RDWRSZ)
-	    for s.running {
-		n, _ := s.Read(buf)
-		out := buf[:n]
-		o := 0
-		for n > 0 {
-		    w, err := conn.Write(out[o:])
-		    if err != nil {
-			s.Logf("remote write error %v\n", err)
-			break
-		    }
-		    o += w
-		    n -= w
-		}
-		if n > 0 {
-		    break
-		}
-	    }
-	    s.Logf("try to stop stream (reader side)\n")
-	    s.running = false
-	}()
-	// writer side
-	go func() {
-	    buf := make([]byte, RDWRSZ)
-	    for s.running {
-		n, err := conn.Read(buf)
-		if err != nil {
-		    s.Logf("remote read error %v\n", err)
-		    break
-		}
-		if n == 0 {
-		    s.Logf("remote conn closed\n")
-		    break
-		}
-		// push it to stream
-		s.Write(buf[:n])
-	    }
-	    s.Logf("try to stop stream (writer side)\n")
-	    s.running = false
-	    // wait a bit before closing conn
-	    time.Sleep(time.Second)
-	    conn.Close()
-	}()
-    }
     // start listening
     serv, err := session.NewServer(listen, func(conn net.Conn) {
 	api_handler(u, conn)
@@ -814,45 +837,21 @@ func server(listen string, reqs []string) {
     serv.Run()
 }
 
-func dummy_stream(u *UDPconn) {
-    for u.running {
-	s := u.OpenStream("dummy")
-	if s == nil {
-	    time.Sleep(100 * time.Millisecond)
-	    continue
-	}
-	// reader in client
-	go func() {
-	    buf := make([]byte, 1024)
-	    for s.running {
-		n, _ := s.Read(buf)
-		s.Tracef("recv %d bytes %s\n", n, string(buf[:32]))
-	    }
-	}()
-	cnt := 0
-	for {
-	    time.Sleep(5 * time.Second)
-	    buf := make([]byte, 2000)
-	    for i := 0; i < 2000; i++ {
-		buf[i] = byte(cnt)
-		cnt++
-	    }
-	    s.Write(buf)
-	}
-    }
-}
-
 type LocalServer struct {
     u *UDPconn
     serv *session.Server
 }
 
 func NewLocalServer(u *UDPconn, listen, remote string) (*LocalServer, error) {
+    if len(u.remotes) == 0 {
+	return nil, fmt.Errorf("no remotes")
+    }
     ls := &LocalServer{ u: u }
+    r := u.remotes[0]
     serv, err := session.NewServer(listen, func(conn net.Conn) {
 	log.Infof("accepted\n")
 	defer conn.Close()
-	s := u.OpenStream(remote)
+	s := r.OpenStream(remote)
 	for i := 0; i < 10; i++ {
 	    if s != nil {
 		break
@@ -862,7 +861,7 @@ func NewLocalServer(u *UDPconn, listen, remote string) (*LocalServer, error) {
 		}
 	    }
 	    time.Sleep(100 * time.Millisecond)
-	    s = u.OpenStream(remote)
+	    s = r.OpenStream(remote)
 	}
 	if s == nil {
 	    log.Printf("unable to open stream\n")
@@ -940,7 +939,10 @@ func do_api(conn net.Conn, u *UDPconn, request string) {
 	    log.Printf("ResolveUDPAddr: %v\n", err)
 	    return
 	}
-	u.conn.WriteToUDP([]byte("Probe"), addr)
+	u.queue <- &SendToPair{
+	    addr: addr,
+	    data: []byte("Probe"),
+	}
 	if conn != nil {
 	    resp := make(chan string, 32)
 	    u.api_resp = resp
@@ -952,10 +954,6 @@ func do_api(conn net.Conn, u *UDPconn, request string) {
 	    u.api_resp = nil
 	}
     case "CONNECT":
-	if u.connected {
-	    log.Infof("already connected to %s\n", u.remotes[0].addr)
-	    return
-	}
 	raddr := strings.TrimSpace(reqs[1])
 	remote, err := NewUDPremote(raddr)
 	if err != nil {
@@ -971,20 +969,23 @@ func do_api(conn net.Conn, u *UDPconn, request string) {
 	    }
 	}
 	u.remotes = append(u.remotes, remote)
+	remote.running = true
+	go remote.Receiver()
+	go remote.Sender(u.queue)
 	go func() {
 	    cnt := 0
-	    for u.connected == false {
-		u.conn.WriteToUDP([]byte("Probe"), remote.addr)
-		time.Sleep(200 * time.Millisecond)
+	    for remote.connected == false {
+		log.Debugf("send probe to %s\n", remote.String())
+		u.queue <- &SendToPair{
+		    addr: remote.addr,
+		    data: []byte("Probe"),
+		}
+		time.Sleep(500 * time.Millisecond)
 		cnt++
 		if cnt % 10 == 0 {
-		    time.Sleep(time.Second)
+		    time.Sleep(10 * time.Second)
 		}
 	    }
-	    // start sender
-	    go u.Sender()
-	    // start connection
-	    go u.Connection()
 	}()
     case "ADD":
 	if len(reqs) != 3 {
