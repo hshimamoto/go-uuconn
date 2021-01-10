@@ -662,7 +662,6 @@ type UDPconn struct {
     conn *net.UDPConn
     remotes []*UDPremote
     running bool
-    connected bool
     queue chan *SendToPair
     api_resp chan string
 }
@@ -730,7 +729,6 @@ func (u *UDPconn)Sender() {
 func (u *UDPconn)Connect() {
     // start receiver
     u.running = true
-    u.connected = false
     go u.Receiver()
     go u.Sender()
 }
@@ -1026,11 +1024,7 @@ func client(listen string, reqs []string) {
 	log.Printf("NewUDPConn: %v\n", err)
 	return
     }
-    log.Debugf("start connecting\n")
     u.Connect()
-    time.Sleep(100 * time.Millisecond)
-    //
-    //go dummy_stream(u)
     // start listening
     serv, err := session.NewServer(listen, func(conn net.Conn) {
 	api_handler(u, conn)
