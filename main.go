@@ -480,6 +480,7 @@ func (u *UDPconn)AllocStream(n int) *Stream {
 }
 
 func (u *UDPconn)Receiver() {
+    log.Infof("start Receiver\n")
     conn := u.conn
     buf := make([]byte, 1500)
     for u.running {
@@ -926,6 +927,7 @@ func do_api(conn net.Conn, u *UDPconn, request string) {
     request = strings.TrimSpace(request)
     reqs := strings.Split(request, " ")
     cmd := strings.TrimSpace(reqs[0])
+    log.Infof("do_api: %s\n", request)
     switch cmd {
     case "CHECK":
 	if len(reqs) != 2 {
@@ -938,10 +940,10 @@ func do_api(conn net.Conn, u *UDPconn, request string) {
 	    log.Printf("ResolveUDPAddr: %v\n", err)
 	    return
 	}
+	u.conn.WriteToUDP([]byte("Probe"), addr)
 	if conn != nil {
 	    resp := make(chan string, 32)
 	    u.api_resp = resp
-	    u.conn.WriteToUDP([]byte("Probe"), addr)
 	    select {
 	    case s := <-resp:
 		conn.Write([]byte(s))
