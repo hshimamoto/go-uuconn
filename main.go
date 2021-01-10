@@ -586,7 +586,7 @@ func (r *UDPremote)Receiver() {
 	select {
 	case msg := <-r.mq:
 	    if r.connected == false {
-		log.Printf("connected with xxx\n")
+		log.Infof("connected with %s\n", r.raddr)
 		r.connected = true
 	    }
 	    // probe?
