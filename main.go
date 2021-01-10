@@ -395,9 +395,18 @@ func ParseMessage(buf []byte) *Message {
     return msg
 }
 
-type UDPconn struct {
+type UDPremote struct {
     addr *net.UDPAddr
+    live bool
+}
+
+func (r *UDPremote)String() string {
+    return r.addr.String()
+}
+
+type UDPconn struct {
     conn *net.UDPConn
+    remotes []*UDPremote
     running bool
     connected bool
     queue chan []byte
@@ -412,12 +421,12 @@ type UDPconn struct {
 
 func NewUDPConn() (*UDPconn, error) {
     u := &UDPconn{}
-    u.addr = nil
     conn, err := net.ListenUDP("udp", nil)
     if err != nil {
 	return nil, err
     }
     u.conn = conn
+    u.remotes = []*UDPremote{}
     u.queue = make(chan []byte, 32)
     u.mq = make(chan *Message, 32)
     u.nr_streams = 64
@@ -466,7 +475,15 @@ func (u *UDPconn)Receiver() {
 	    log.Printf("Read: %v\n", err)
 	    continue
 	}
-	if addr.String() != u.addr.String() {
+	raddr := addr.String()
+	var remote *UDPremote = nil
+	for _, r := range u.remotes {
+	    if r.String() == raddr {
+		remote = r
+		break
+	    }
+	}
+	if remote == nil {
 	    if buf[0] == 0x50 { // 'P'robe
 		log.Printf("read from %s %s\n", addr.String(), string(buf[:n]))
 		fmt.Printf("Remote %s\n", string(buf[:n]))
@@ -500,11 +517,19 @@ func (u *UDPconn)Receiver() {
 func (u *UDPconn)Sender() {
     ticker := time.NewTicker(10 * time.Second)
     for u.running {
+	var addr *net.UDPAddr = nil
+	if len(u.remotes) > 0 {
+	    addr = u.remotes[0].addr
+	}
 	select {
 	case buf := <-u.queue:
-	    u.conn.WriteToUDP(buf, u.addr)
+	    if addr != nil {
+		u.conn.WriteToUDP(buf, addr)
+	    }
 	case <-ticker.C:
-	    u.conn.WriteToUDP([]byte("Probe"), u.addr)
+	    if addr != nil {
+		u.conn.WriteToUDP([]byte("Probe"), addr)
+	    }
 	}
     }
 }
@@ -913,7 +938,7 @@ func do_api(conn net.Conn, u *UDPconn, request string) {
 	}
     case "CONNECT":
 	if u.connected {
-	    log.Infof("already connected to %s\n", u.addr)
+	    log.Infof("already connected to %s\n", u.remotes[0].addr)
 	    return
 	}
 	raddr := strings.TrimSpace(reqs[1])
@@ -921,11 +946,22 @@ func do_api(conn net.Conn, u *UDPconn, request string) {
 	if err != nil {
 	    return
 	}
-	u.addr = addr
+	// check in remote
+	raddr = addr.String()
+	for _, r := range u.remotes {
+	    if r.String() == raddr {
+		// already have
+		log.Infof("already have connection with %s\n", raddr)
+		return
+	    }
+	}
+	r := &UDPremote{}
+	r.addr = addr
+	u.remotes = append(u.remotes, r)
 	go func() {
 	    cnt := 0
 	    for u.connected == false {
-		u.conn.WriteToUDP([]byte("Probe"), u.addr)
+		u.conn.WriteToUDP([]byte("Probe"), addr)
 		time.Sleep(200 * time.Millisecond)
 		cnt++
 		if cnt % 10 == 0 {
