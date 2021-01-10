@@ -911,9 +911,6 @@ func do_api(u *UDPconn, request string) {
 	    return
 	}
 	u.conn.WriteToUDP([]byte("Probe"), addr)
-	buf := make([]byte, 1500)
-	n, _, _ := u.conn.ReadFromUDP(buf)
-	fmt.Printf("Remote %s\n", string(buf[:n]))
     case "CONNECT":
 	if u.connected {
 	    log.Infof("already connected to %s\n", u.addr)
