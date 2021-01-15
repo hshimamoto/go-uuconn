@@ -582,9 +582,12 @@ func (r *UDPremote)Sender(queue chan *SendToPair) {
 
 func (r *UDPremote)Receiver() {
     log.Infof("start remote Receiver\n")
+    lastrecv := time.Now().Add(time.Minute)
+    ticker := time.NewTicker(30 * time.Second)
     for r.running {
 	select {
 	case msg := <-r.mq:
+	    lastrecv = time.Now().Add(time.Minute)
 	    if r.connected == false {
 		log.Infof("connected with %s\n", r.raddr)
 		r.connected = true
@@ -649,8 +652,16 @@ func (r *UDPremote)Receiver() {
 		// close the stream
 		s.running = false
 	    }
+	case <-ticker.C:
+	    if time.Now().After(lastrecv) {
+		log.Infof("no activity on %s\n", r.addr)
+		// close stream
+		r.running = false
+	    }
 	}
     }
+    ticker.Stop()
+    log.Infof("remote %s is closed\n", r.addr)
 }
 
 type SendToPair struct {
@@ -692,7 +703,8 @@ func (u *UDPconn)Receiver() {
 	}
 	raddr := addr.String()
 	var remote *UDPremote = nil
-	for _, r := range u.remotes {
+	curr_remotes := u.remotes
+	for _, r := range curr_remotes {
 	    if r.String() == raddr {
 		remote = r
 		break
@@ -957,9 +969,21 @@ func do_api(conn net.Conn, u *UDPconn, request string) {
 	if err != nil {
 	    return
 	}
+	// to remove dead remote
+	curr_remotes := u.remotes
+	new_remotes := []*UDPremote{}
+	for _, r := range curr_remotes {
+	    if r.running {
+		new_remotes = append(new_remotes, r)
+	    } else {
+		log.Infof("%s is removed\n", r.addr)
+	    }
+	}
+	u.remotes = new_remotes
 	// check in remote
+	curr_remotes = u.remotes
 	raddr = remote.String()
-	for _, r := range u.remotes {
+	for _, r := range curr_remotes {
 	    if r.String() == raddr {
 		// already have
 		log.Infof("already have connection with %s\n", raddr)
