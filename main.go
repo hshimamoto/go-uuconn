@@ -41,6 +41,7 @@ type Blob struct {
     ptr, seq, ack int
     skip bool
     inflight int
+    ready bool
 }
 
 func (b *Blob)Transfer(s *Stream, queue chan<- []byte) {
@@ -175,7 +176,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     pool := []*Message{}
     msgsz := 32768 + 16384
     for s.running {
-	if pending == nil || len(pending.data) < msgsz {
+	if pending == nil || pending.ready == false {
 	    select {
 	    case next := <-s.sendq:
 		blen := 0
@@ -192,6 +193,9 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    nr_append++
 		} else {
 		    pending = &Blob{ data: next }
+		}
+		if len(pending.data) > msgsz {
+		    pending.ready = true
 		}
 	    default:
 	    }
