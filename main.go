@@ -42,38 +42,50 @@ type Blob struct {
     skip bool
     inflight int
     ready bool
+    //
+    msgs []*Message
 }
 
-func (b *Blob)Transfer(s *Stream, queue chan<- []byte) {
+func (b *Blob)MessageSetup(s *Stream) {
+    b.msgs = []*Message{}
     offset := 0
-    for b.ptr != b.last {
-	datalen := ((b.last + 65536) - b.ptr) % 65536
+    ptr := b.first
+    for ptr != b.last {
+	datalen := ((b.last + 65536) - ptr) % 65536
 	if datalen > MSS {
 	    datalen = MSS
 	}
 	seq0 := (b.first + offset) % 65536
 	seq1 := (b.first + offset + datalen) % 65536
-	if seq0 == b.seq {
+	msg := &Message{
+	    mtype: MSG_DATA,
+	    sid: s.sid,
+	    key: s.key,
+	    seq0: seq0,
+	    seq1: seq1,
+	}
+	msg.data = make([]byte, datalen)
+	copy(msg.data, b.data[offset:offset+datalen])
+	//msg.data = b.data[offset:offset+datalen]
+	b.msgs = append(b.msgs, msg)
+	offset += datalen
+	ptr = msg.seq1
+    }
+}
+
+func (b *Blob)Transfer(s *Stream, queue chan<- []byte) {
+    for _, msg := range b.msgs {
+	if msg.seq0 == b.seq {
 	    b.skip = false
 	}
 	if b.skip {
-	    s.Tracef("Push Data seq %d-%d [SKIP]\n", seq0, seq1)
+	    s.Tracef("Push Data seq %d-%d [SKIP]\n", msg.seq0, msg.seq1)
 	} else {
-	    msg := &Message{
-		mtype: MSG_DATA,
-		sid: s.sid,
-		key: s.key,
-		seq0: seq0,
-		seq1: seq1,
-	    }
-	    msg.data = b.data[offset:offset+datalen]
-	    s.Tracef("Push Data seq %d-%d [%d]\n", seq0, seq1, msg.data[0])
-	    buf := msg.Pack()
-	    queue <- buf
+	    s.Tracef("Push Data seq %d-%d [%d]\n", msg.seq0, msg.seq1, msg.data[0])
+	    queue <- msg.Pack()
 	    b.inflight++
 	}
-	b.ptr = seq1
-	offset += datalen
+	b.ptr = msg.seq1
     }
 }
 
@@ -215,6 +227,8 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		// replace
 		b = pending
 		pending = nil
+		// rest
+		b.MessageSetup(s)
 		// rest
 		resend = 100
 		s.Tracef("replace blob last=%d (prev %d)\n", b.last, prev)
