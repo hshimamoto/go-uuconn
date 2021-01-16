@@ -45,7 +45,18 @@ type Blob struct {
     msgs []*Message
 }
 
-func (b *Blob)MessageSetup(s *Stream) {
+func (b *Blob)MessageSetup(s *Stream, pb *Blob) {
+    if b.ready {
+	return
+    }
+    prev := pb.last
+    blen := len(b.data)
+    b.first = prev
+    b.last = (prev + blen) % 65536
+    b.ptr = prev
+    b.seq = prev
+    b.ack = prev
+    b.inflight = 0
     b.msgs = []*Message{}
     offset := 0
     ptr := b.first
@@ -70,6 +81,7 @@ func (b *Blob)MessageSetup(s *Stream) {
 	offset += datalen
 	ptr = msg.seq1
     }
+    b.ready = true
 }
 
 func (b *Blob)Transfer(s *Stream, queue chan<- []byte) {
@@ -220,30 +232,21 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    pending = &Blob{ data: next }
 		}
 		if len(pending.data) > msgsz {
-		    pending.ready = true
+		    pending.MessageSetup(s, b)
+		    // and now pending.ready is true
 		}
 	    default:
 	    }
 	}
 	if pending != nil {
 	    if b.ack == b.last {
-		prev := b.last
-		// setup pending blob
-		blen := len(pending.data)
-		pending.first = prev
-		pending.last = (prev + blen) % 65536
-		pending.ptr = prev
-		pending.seq = prev
-		pending.ack = prev
-		pending.inflight = 0
+		pending.MessageSetup(s, b)
 		// replace
 		b = pending
 		pending = nil
 		// rest
-		b.MessageSetup(s)
-		// rest
 		resend = 100
-		s.Tracef("replace blob last=%d (prev %d)\n", b.last, prev)
+		s.Tracef("replace blob last=%d (prev %d)\n", b.last, b.first)
 		nr_replace++
 		// send NEXT for drop pool
 		msg := &Message{
