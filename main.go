@@ -76,6 +76,13 @@ func (b *Blob)Transfer(s *Stream, queue chan<- []byte) {
     }
 }
 
+func (b *Blob)Rewind(s *Stream, t string) {
+    s.Tracef("%s rewind %d to %d ack %d (%d) inflight %d\n", t, b.ptr, b.first, b.seq, b.last, b.inflight)
+    b.ptr = b.first
+    b.skip = true
+    b.inflight = 0
+}
+
 type Stream struct {
     sid int
     used bool
@@ -277,12 +284,9 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    }
 		    if dupack >= 5 {
 			if fastrewindack != b.ack {
-			    s.Tracef("fast rewind %d to %d ack %d (%d) inflight %d\n", b.ptr, b.first, b.seq, b.last, b.inflight)
-			    b.ptr = b.first
-			    b.skip = true
+			    b.Rewind(s, "fast")
 			    nr_rewind++
 			    dupack = 0
-			    b.inflight = 0
 			    fastrewindack = b.ack
 			}
 		    }
@@ -300,12 +304,9 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    // must wait a bit
 	    if time.Now().After(ultime) {
 		if b.seq != b.last {
-		    s.Tracef("slow rewind %d to %d ack %d (%d) inflight %d\n", b.ptr, b.first, b.seq, b.last, b.inflight)
-		    b.ptr = b.first
-		    b.skip = true
+		    b.Rewind(s, "slow")
 		    nr_rewind++
 		    resend += 100
-		    b.inflight = 0
 		}
 	    }
 	    // keep alive
