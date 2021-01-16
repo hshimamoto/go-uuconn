@@ -881,18 +881,17 @@ func NewLocalServer(u *UDPconn, listen, remote string) (*LocalServer, error) {
 	    buf := make([]byte, RDWRSZ)
 	    for s.running {
 		n, _ := s.Read(buf)
-		out := buf[:n]
-		o := 0
-		for n > 0 {
-		    w, err := conn.Write(out[o:])
-		    if err != nil {
-			s.Logf("remote write error %v\n", err)
-			break
-		    }
-		    o += w
-		    n -= w
+		if n == 0 {
+		    s.Logf("local stream is null\n")
+		    break
 		}
-		if n > 0 {
+		w, err := conn.Write(buf[:n])
+		if err != nil {
+		    s.Logf("local write error %v\n", err)
+		    break
+		}
+		if w != n {
+		    s.Logf("local write only %d of %d\n", w, n)
 		    break
 		}
 	    }
