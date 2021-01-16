@@ -94,17 +94,21 @@ func (b *Blob)Transfer(s *Stream, queue chan<- []byte) {
 }
 
 func (b *Blob)Ack(s *Stream, ack int) {
-    if b.ack == ack {
+    b.ack = ack
+}
+
+func (b *Blob)Rebuild(s *Stream) {
+    // don't rebuild small number of msgs
+    if len(b.msgs) < 3 {
 	return
     }
-    b.ack = ack
     msgs := b.msgs
     b.msgs = []*Message{}
     skip := true
     for _, msg := range msgs {
 	if skip {
 	    s.Tracef("drop %d-%d\n", msg.seq0, msg.seq1)
-	    if msg.seq1 == ack {
+	    if msg.seq1 == b.ack {
 		skip = false
 	    }
 	    continue
@@ -112,10 +116,15 @@ func (b *Blob)Ack(s *Stream, ack int) {
 	s.Tracef("requeue %d-%d\n", msg.seq0, msg.seq1)
 	b.msgs = append(b.msgs, msg)
     }
+    if len(b.msgs) == 0 {
+	s.Tracef("unable to drop\n")
+	b.msgs = msgs
+    }
 }
 
 func (b *Blob)Rewind(s *Stream, t string) {
     s.Tracef("%s rewind %d to %d ack %d (%d) inflight %d\n", t, b.ptr, b.first, b.ack, b.last, b.inflight)
+    b.Rebuild(s)
     b.ptr = b.ack
     b.inflight = 0
 }
