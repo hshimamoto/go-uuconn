@@ -40,13 +40,14 @@ type Blob struct {
     first, last int
     ptr, ack int
     inflight int
+    blkid int
     ready bool
     //
     msgs []*Message
     sacks []int
 }
 
-func (b *Blob)MessageSetup(s *Stream, pb *Blob) {
+func (b *Blob)MessageSetup(s *Stream, pb *Blob, blkid int) {
     if b.ready {
 	return
     }
@@ -56,6 +57,7 @@ func (b *Blob)MessageSetup(s *Stream, pb *Blob) {
     b.last = (prev + blen) % 65536
     b.ptr = prev
     b.ack = prev
+    b.blkid = blkid
     b.inflight = 0
     b.msgs = []*Message{}
     offset := 0
@@ -71,6 +73,7 @@ func (b *Blob)MessageSetup(s *Stream, pb *Blob) {
 	    mtype: MSG_DATA,
 	    sid: s.sid,
 	    key: s.key,
+	    blkid: b.blkid,
 	    seq0: seq0,
 	    seq1: seq1,
 	}
@@ -215,7 +218,9 @@ func (s *Stream)Runner(queue chan<- []byte) {
     b.inflight = 0
     pending = nil
     // local variables
+    blkid := 0
     ackseq := 0
+    ackblkid := 0
     ackflag := false
     dlseq := 0
     dupack := 0
@@ -250,9 +255,10 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    nr_append++
 		} else {
 		    pending = &Blob{ data: next }
+		    blkid++
 		}
 		if len(pending.data) > msgsz {
-		    pending.MessageSetup(s, b)
+		    pending.MessageSetup(s, b, blkid)
 		    // and now pending.ready is true
 		}
 	    default:
@@ -260,7 +266,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	}
 	if pending != nil {
 	    if b.ack == b.last {
-		pending.MessageSetup(s, b)
+		pending.MessageSetup(s, b, blkid)
 		// replace
 		b = pending
 		pending = nil
@@ -304,6 +310,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    s.recvq_enq += len(msg.data)
 		    dlseq = msg.seq1
 		    ackseq = msg.seq1
+		    ackblkid = msg.blkid
 		    // check pool
 		    retry := len(pool) > 0
 		    for retry {
@@ -311,6 +318,9 @@ func (s *Stream)Runner(queue chan<- []byte) {
 			pool2 := []*Message{}
 			s.Tracef("check pool %d\n", len(pool))
 			for _, m := range pool {
+			    if m.blkid != ackblkid {
+				continue
+			    }
 			    if m.seq0 == dlseq {
 				if ackseq != m.seq1 {
 				    s.Tracef("Change ackseq %d to %d [pool]\n", ackseq, m.seq1)
@@ -428,6 +438,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		mtype: MSG_ACK,
 		sid: s.sid,
 		key: s.key,
+		blkid: ackblkid,
 		seq0: ackseq,
 		seq1: ackseq,
 	    }
@@ -554,6 +565,7 @@ type Message struct {
     mtype int
     sid int
     key int
+    blkid int
     seq0, seq1 int
     data []byte
 }
@@ -569,14 +581,15 @@ const MSG_NEXT	int = 0x4e // Next
 
 func (m *Message)Pack() []byte {
     datalen := len(m.data)
-    msglen := 1 + 1 + 2 + 2 + 2 + datalen
+    msglen := 1 + 1 + 2 + 2 + 2 + 2 + datalen
     buf := make([]byte, msglen)
     buf[0] = byte(m.mtype)
     buf[1] = byte(m.sid)
     binary.LittleEndian.PutUint16(buf[2:], uint16(m.key))
-    binary.LittleEndian.PutUint16(buf[4:], uint16(m.seq0))
-    binary.LittleEndian.PutUint16(buf[6:], uint16(m.seq1))
-    copy(buf[8:], m.data)
+    binary.LittleEndian.PutUint16(buf[4:], uint16(m.blkid))
+    binary.LittleEndian.PutUint16(buf[6:], uint16(m.seq0))
+    binary.LittleEndian.PutUint16(buf[8:], uint16(m.seq1))
+    copy(buf[10:], m.data)
     return buf
 }
 
@@ -584,14 +597,15 @@ func ParseMessage(buf []byte) *Message {
     msg := &Message{}
     msg.mtype = int(buf[0])
     msg.sid = int(buf[1])
-    if len(buf) < 8 {
+    if len(buf) < 10 {
 	return msg
     }
     msg.key = int(binary.LittleEndian.Uint16(buf[2:]))
-    msg.seq0 = int(binary.LittleEndian.Uint16(buf[4:]))
-    msg.seq1 = int(binary.LittleEndian.Uint16(buf[6:]))
-    msg.data = make([]byte, len(buf[8:]))
-    copy(msg.data, buf[8:])
+    msg.blkid = int(binary.LittleEndian.Uint16(buf[4:]))
+    msg.seq0 = int(binary.LittleEndian.Uint16(buf[6:]))
+    msg.seq1 = int(binary.LittleEndian.Uint16(buf[8:]))
+    msg.data = make([]byte, len(buf[10:]))
+    copy(msg.data, buf[10:])
     return msg
 }
 
