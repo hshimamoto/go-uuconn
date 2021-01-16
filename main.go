@@ -40,6 +40,40 @@ type Blob struct {
     first, last int
     ptr, seq, ack int
     skip bool
+    inflight int
+}
+
+func (b *Blob)Transfer(s *Stream, queue chan<- []byte) {
+    offset := 0
+    for b.ptr != b.last {
+	datalen := ((b.last + 65536) - b.ptr) % 65536
+	if datalen > MSS {
+	    datalen = MSS
+	}
+	seq0 := (b.first + offset) % 65536
+	seq1 := (b.first + offset + datalen) % 65536
+	if seq0 == b.seq {
+	    b.skip = false
+	}
+	if b.skip {
+	    s.Tracef("Push Data seq %d-%d [SKIP]\n", seq0, seq1)
+	} else {
+	    msg := &Message{
+		mtype: MSG_DATA,
+		sid: s.sid,
+		key: s.key,
+		seq0: seq0,
+		seq1: seq1,
+	    }
+	    msg.data = b.data[offset:offset+datalen]
+	    s.Tracef("Push Data seq %d-%d [%d]\n", seq0, seq1, msg.data[0])
+	    buf := msg.Pack()
+	    queue <- buf
+	    b.inflight++
+	}
+	b.ptr = seq1
+	offset += datalen
+    }
 }
 
 type Stream struct {
@@ -113,13 +147,13 @@ func (s *Stream)Runner(queue chan<- []byte) {
     b.ptr = 0
     b.seq = 0
     b.ack = 0
+    b.inflight = 0
     pending = nil
     // local variables
     ackseq := 0
     ackflag := false
     dlseq := 0
     dupack := 0
-    inflight := 0
     fastrewindack := 0
     resend := time.Duration(100)
     ultime := time.Now()
@@ -166,12 +200,12 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		pending.seq = prev
 		pending.ack = prev
 		pending.skip = false
+		pending.inflight = 0
 		// replace
 		b = pending
 		pending = nil
 		// rest
 		resend = 100
-		inflight = 0
 		s.Tracef("replace blob last=%d (prev %d)\n", b.last, prev)
 		nr_replace++
 		// send NEXT for drop pool
@@ -185,39 +219,11 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		queue <- msg.Pack()
 	    }
 	}
-	offset := 0
 	if b.ptr != b.last {
 	    ultime = time.Now().Add(time.Millisecond * resend)
 	    ticker.Reset(resend * time.Millisecond)
-	}
-	for b.ptr != b.last {
-	    datalen := ((b.last + 65536) - b.ptr) % 65536
-	    if datalen > MSS {
-		datalen = MSS
-	    }
-	    seq0 := (b.first + offset) % 65536
-	    seq1 := (b.first + offset + datalen) % 65536
-	    if seq0 == b.seq {
-		b.skip = false
-	    }
-	    if b.skip {
-		s.Tracef("Push Data seq %d-%d [SKIP]\n", seq0, seq1)
-	    } else {
-		msg := &Message{
-		    mtype: MSG_DATA,
-		    sid: s.sid,
-		    key: s.key,
-		    seq0: seq0,
-		    seq1: seq1,
-		}
-		msg.data = b.data[offset:offset+datalen]
-		s.Tracef("Push Data seq %d-%d [%d]\n", seq0, seq1, msg.data[0])
-		buf := msg.Pack()
-		queue <- buf
-		inflight++
-	    }
-	    b.ptr = seq1
-	    offset += datalen
+	    //
+	    b.Transfer(s, queue)
 	}
 	select {
 	case msg := <-s.mq:
@@ -271,12 +277,12 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    }
 		    if dupack >= 5 {
 			if fastrewindack != b.ack {
-			    s.Tracef("fast rewind %d to %d ack %d (%d) inflight %d\n", b.ptr, b.first, b.seq, b.last, inflight)
+			    s.Tracef("fast rewind %d to %d ack %d (%d) inflight %d\n", b.ptr, b.first, b.seq, b.last, b.inflight)
 			    b.ptr = b.first
 			    b.skip = true
 			    nr_rewind++
 			    dupack = 0
-			    inflight = 0
+			    b.inflight = 0
 			    fastrewindack = b.ack
 			}
 		    }
@@ -294,12 +300,12 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    // must wait a bit
 	    if time.Now().After(ultime) {
 		if b.seq != b.last {
-		    s.Tracef("slow rewind %d to %d ack %d (%d) inflight %d\n", b.ptr, b.first, b.seq, b.last, inflight)
+		    s.Tracef("slow rewind %d to %d ack %d (%d) inflight %d\n", b.ptr, b.first, b.seq, b.last, b.inflight)
 		    b.ptr = b.first
 		    b.skip = true
 		    nr_rewind++
 		    resend += 100
-		    inflight = 0
+		    b.inflight = 0
 		}
 	    }
 	    // keep alive
