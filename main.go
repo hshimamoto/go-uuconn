@@ -43,6 +43,7 @@ type Blob struct {
     ready bool
     //
     msgs []*Message
+    sacks []int
 }
 
 func (b *Blob)MessageSetup(s *Stream, pb *Blob) {
@@ -93,8 +94,9 @@ func (b *Blob)Transfer(s *Stream, queue chan<- []byte) {
     }
 }
 
-func (b *Blob)Ack(s *Stream, ack int) {
+func (b *Blob)Ack(s *Stream, ack int, sacks []int) {
     b.ack = ack
+    b.sacks = sacks
 }
 
 func (b *Blob)Rebuild(s *Stream) {
@@ -111,6 +113,17 @@ func (b *Blob)Rebuild(s *Stream) {
 	    if msg.seq1 == b.ack {
 		skip = false
 	    }
+	    continue
+	}
+	hit := false
+	for _, sack := range b.sacks {
+	    if msg.seq0 == sack {
+		s.Tracef("sack drop %d-%d\n", msg.seq0, msg.seq1)
+		hit = true
+		break
+	    }
+	}
+	if hit {
 	    continue
 	}
 	s.Tracef("requeue %d-%d\n", msg.seq0, msg.seq1)
@@ -292,22 +305,41 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    dlseq = msg.seq1
 		    ackseq = msg.seq1
 		    // check pool
-		    for _, m := range pool {
-			if m.seq0 == dlseq {
-			    if ackseq != m.seq1 {
-				s.Tracef("Change ackseq %d to %d [pool]\n", ackseq, m.seq1)
+		    retry := len(pool) > 0
+		    for retry {
+			retry = false
+			pool2 := []*Message{}
+			s.Tracef("check pool %d\n", len(pool))
+			for _, m := range pool {
+			    if m.seq0 == dlseq {
+				if ackseq != m.seq1 {
+				    s.Tracef("Change ackseq %d to %d [pool]\n", ackseq, m.seq1)
+				}
+				s.recvq <- m.data
+				s.Tracef("recvq: enqueue %d bytes %d\n", len(m.data), s.recvq_enq)
+				s.recvq_enq += len(m.data)
+				dlseq = m.seq1
+				ackseq = m.seq1
+				retry = true
+				continue
 			    }
-			    s.recvq <- m.data
-			    s.Tracef("recvq: enqueue %d bytes %d\n", len(m.data), s.recvq_enq)
-			    s.recvq_enq += len(m.data)
-			    dlseq = m.seq1
-			    ackseq = m.seq1
+			    pool2 = append(pool2, m)
 			}
+			pool = pool2
 		    }
 		} else {
 		    // pool it
-		    pool = append(pool, msg)
-		    s.Tracef("pool %d-%d\n", msg.seq0, msg.seq1)
+		    hit := false
+		    for _, m := range pool {
+			if m.seq0 == msg.seq0 {
+			    hit = true
+			    break
+			}
+		    }
+		    if !hit {
+			pool = append(pool, msg)
+			s.Tracef("pool %d-%d\n", msg.seq0, msg.seq1)
+		    }
 		}
 		if ackflag == false {
 		    ackq <-true
@@ -319,8 +351,13 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		sack := []int{}
 		for n := 0; n < len(msg.data); n += 2 {
 		    seq := int(binary.LittleEndian.Uint16(msg.data[n:]))
-		    s.Tracef("sack %d\n", seq)
-		    sack = append(sack, seq)
+		    diff := (65536 + seq - b.first) % 65536
+		    if diff < msgsz + 4096 {
+			s.Tracef("sack %d\n", seq)
+			sack = append(sack, seq)
+		    } else {
+			s.Tracef("sack %d invalid\n", seq)
+		    }
 		}
 		diff := (65536 + msg.seq0 - b.ack) % 65536
 		if diff < msgsz + 4096 {
@@ -337,7 +374,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 			    fastrewindack = b.ack
 			}
 		    }
-		    b.Ack(s, msg.seq0)
+		    b.Ack(s, msg.seq0, sack)
 		} else {
 		    nr_badack++
 		}
