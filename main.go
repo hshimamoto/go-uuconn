@@ -39,7 +39,6 @@ type Blob struct {
     // seq
     first, last int
     ptr, seq, ack int
-    skip bool
     inflight int
     ready bool
     //
@@ -75,24 +74,38 @@ func (b *Blob)MessageSetup(s *Stream) {
 
 func (b *Blob)Transfer(s *Stream, queue chan<- []byte) {
     for _, msg := range b.msgs {
-	if msg.seq0 == b.seq {
-	    b.skip = false
-	}
-	if b.skip {
-	    s.Tracef("Push Data seq %d-%d [SKIP]\n", msg.seq0, msg.seq1)
-	} else {
-	    s.Tracef("Push Data seq %d-%d [%d]\n", msg.seq0, msg.seq1, msg.data[0])
-	    queue <- msg.Pack()
-	    b.inflight++
-	}
+	s.Tracef("Push Data seq %d-%d [%d]\n", msg.seq0, msg.seq1, msg.data[0])
+	queue <- msg.Pack()
+	b.inflight++
 	b.ptr = msg.seq1
+    }
+}
+
+func (b *Blob)Ack(s *Stream, ack int) {
+    if b.ack == ack {
+	return
+    }
+    b.ack = ack
+    b.seq = ack
+    msgs := b.msgs
+    b.msgs = []*Message{}
+    skip := true
+    for _, msg := range msgs {
+	if skip {
+	    s.Tracef("drop %d-%d\n", msg.seq0, msg.seq1)
+	    if msg.seq1 == ack {
+		skip = false
+	    }
+	    continue
+	}
+	s.Tracef("requeue %d-%d\n", msg.seq0, msg.seq1)
+	b.msgs = append(b.msgs, msg)
     }
 }
 
 func (b *Blob)Rewind(s *Stream, t string) {
     s.Tracef("%s rewind %d to %d ack %d (%d) inflight %d\n", t, b.ptr, b.first, b.seq, b.last, b.inflight)
-    b.ptr = b.first
-    b.skip = true
+    b.ptr = b.ack
     b.inflight = 0
 }
 
@@ -222,7 +235,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		pending.ptr = prev
 		pending.seq = prev
 		pending.ack = prev
-		pending.skip = false
 		pending.inflight = 0
 		// replace
 		b = pending
@@ -308,8 +320,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 			    fastrewindack = b.ack
 			}
 		    }
-		    b.ack = msg.seq0
-		    b.seq = b.ack
+		    b.Ack(s, msg.seq0)
 		} else {
 		    nr_badack++
 		}
