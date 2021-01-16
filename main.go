@@ -104,6 +104,8 @@ func (s *Stream)Runner(queue chan<- []byte) {
     ulptr := 0
     ulack := 0
     ulseq := 0
+    ulstart := 0
+    ulskip := false
     ackseq := 0
     lastseq := 0
     ackflag := false
@@ -135,7 +137,9 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    if ulack == lastseq {
 		ulbuf = pendingbuf
 		buflen = len(ulbuf)
+		ulstart = ulseq
 		ulptr = ulseq
+		ulskip = false
 		lastseq = (ulseq + buflen) % 65536
 		pendingbuf = nil
 		s.Tracef("replace buffer lastseq=%d (prev %d)\n", lastseq, ulack)
@@ -152,19 +156,26 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    if datalen > MSS {
 		datalen = MSS
 	    }
-	    seq0 := (ulseq + offset) % 65536
-	    seq1 := (ulseq + offset + datalen) % 65536
-	    msg := &Message{
-		mtype: MSG_DATA,
-		sid: s.sid,
-		key: s.key,
-		seq0: seq0,
-		seq1: seq1,
+	    seq0 := (ulstart + offset) % 65536
+	    seq1 := (ulstart + offset + datalen) % 65536
+	    if seq0 == ulseq {
+		ulskip = false
 	    }
-	    msg.data = ulbuf[offset:offset+datalen]
-	    s.Tracef("Push Data seq %d-%d [%d]\n", seq0, seq1, msg.data[0])
-	    buf := msg.Pack()
-	    queue <- buf
+	    if ulskip {
+		s.Tracef("Push Data seq %d-%d [SKIP]\n", seq0, seq1)
+	    } else {
+		msg := &Message{
+		    mtype: MSG_DATA,
+		    sid: s.sid,
+		    key: s.key,
+		    seq0: seq0,
+		    seq1: seq1,
+		}
+		msg.data = ulbuf[offset:offset+datalen]
+		s.Tracef("Push Data seq %d-%d [%d]\n", seq0, seq1, msg.data[0])
+		buf := msg.Pack()
+		queue <- buf
+	    }
 	    ulptr = seq1
 	    offset += datalen
 	}
@@ -207,8 +218,9 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    // must wait a bit
 	    if time.Now().After(ultime) {
 		if ulseq != lastseq {
-		    s.Tracef("rewind %d to %d (%d)\n", ulptr, ulseq, lastseq)
-		    ulptr = ulseq
+		    s.Tracef("rewind %d to %d ack %d (%d)\n", ulptr, ulstart, ulseq, lastseq)
+		    ulptr = ulstart
+		    ulskip = true
 		    nr_rewind++
 		}
 	    }
