@@ -305,7 +305,14 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    ackflag = true
 		}
 	    case MSG_ACK:
-		s.Tracef("MSG: Ack seq %d-%d\n", msg.seq0, msg.seq1)
+		s.Tracef("MSG: Ack seq %d-%d %d\n", msg.seq0, msg.seq1, len(msg.data))
+		// show sack
+		sack := []int{}
+		for n := 0; n < len(msg.data); n += 2 {
+		    seq := int(binary.LittleEndian.Uint16(msg.data[n:]))
+		    s.Tracef("sack %d\n", seq)
+		    sack = append(sack, seq)
+		}
 		diff := (65536 + msg.seq0 - b.ack) % 65536
 		if diff < msgsz + 4096 {
 		    if b.ack == msg.seq0 {
@@ -377,6 +384,12 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		key: s.key,
 		seq0: ackseq,
 		seq1: ackseq,
+	    }
+	    // sack
+	    sacklen := len(pool) * 2
+	    msg.data = make([]byte, sacklen)
+	    for i, m := range pool {
+		binary.LittleEndian.PutUint16(msg.data[i*2:], uint16(m.seq0))
 	    }
 	    buf := msg.Pack()
 	    queue <- buf
