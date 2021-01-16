@@ -122,6 +122,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     nr_append := 0
     nr_rewind := 0
     nr_badack := 0
+    pool := []*Message{}
     msgsz := 32768 + 16384
     for s.running {
 	if pendingbuf == nil || len(pendingbuf) < msgsz {
@@ -205,6 +206,29 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    s.recvq_enq += len(msg.data)
 		    dlseq = msg.seq1
 		    ackseq = msg.seq1
+		    clear := false
+		    // check pool
+		    for _, m := range pool {
+			if m.seq0 == dlseq {
+			    if ackseq != m.seq1 {
+				s.Tracef("Change ackseq %d to %d [pool]\n", ackseq, m.seq1)
+			    }
+			    s.recvq <- m.data
+			    s.Tracef("recvq: enqueue %d bytes %d\n", len(m.data), s.recvq_enq)
+			    s.recvq_enq += len(m.data)
+			    dlseq = m.seq1
+			    ackseq = m.seq1
+			    clear = true
+			}
+		    }
+		    // clear pool
+		    if clear {
+			pool = []*Message{}
+		    }
+		} else {
+		    // pool it
+		    pool = append(pool, msg)
+		    s.Tracef("pool %d-%d\n", msg.seq0, msg.seq1)
 		}
 		if ackflag == false {
 		    ackq <-true
