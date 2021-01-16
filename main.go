@@ -47,6 +47,8 @@ type Stream struct {
     recvq chan []byte
     established bool
     recv []byte
+    rmtx sync.Mutex
+    wmtx sync.Mutex
 }
 
 func NewStream(sid, sz int) *Stream {
@@ -297,6 +299,8 @@ func (s *Stream)StartRunner(queue chan<- []byte) {
 }
 
 func (s *Stream)Read(buf []byte) (int, error) {
+    s.rmtx.Lock()
+    defer s.rmtx.Unlock()
     for s.recv == nil {
 	next := []byte(nil)
 	select {
@@ -346,6 +350,8 @@ func (s *Stream)Write(buf []byte) (int, error) {
     }
     sendbuf := make([]byte, len(buf))
     n := len(buf)
+    s.wmtx.Lock()
+    defer s.wmtx.Unlock()
     for i := 0; i < n; i++ {
 	sendbuf[i] = buf[i] ^ s.wenc
 	s.wenc++
