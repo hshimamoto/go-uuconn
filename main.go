@@ -152,6 +152,15 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		inflight = 0
 		s.Tracef("replace buffer lastseq=%d (prev %d)\n", lastseq, ulack)
 		nr_replace++
+		// send NEXT for drop pool
+		msg := &Message{
+		    mtype: MSG_NEXT,
+		    sid: s.sid,
+		    key: s.key,
+		    seq0: 0,
+		    seq1: 0,
+		}
+		queue <- msg.Pack()
 	    }
 	}
 	offset := 0
@@ -207,7 +216,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    s.recvq_enq += len(msg.data)
 		    dlseq = msg.seq1
 		    ackseq = msg.seq1
-		    clear := false
 		    // check pool
 		    for _, m := range pool {
 			if m.seq0 == dlseq {
@@ -219,12 +227,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 			    s.recvq_enq += len(m.data)
 			    dlseq = m.seq1
 			    ackseq = m.seq1
-			    clear = true
 			}
-		    }
-		    // clear pool
-		    if clear {
-			pool = []*Message{}
 		    }
 		} else {
 		    // pool it
@@ -260,6 +263,9 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		} else {
 		    nr_badack++
 		}
+	    case MSG_NEXT:
+		s.Tracef("MSG: Next drop pool %d\n", len(pool))
+		pool = []*Message{}
 	    }
 	    // ignore KEEP
 	case <-ticker.C:
@@ -441,6 +447,7 @@ const MSG_OPEN	int = 0x4f // Open
 const MSG_RESET	int = 0x52 // Reset
 const MSG_PROBE	int = 0x50 // Probe
 const MSG_probe	int = 0x70 // probe
+const MSG_NEXT	int = 0x4e // Next
 
 func (m *Message)Pack() []byte {
     datalen := len(m.data)
@@ -676,7 +683,7 @@ func (r *UDPremote)Receiver() {
 	    }
 	    s := r.streams[sid]
 	    switch msg.mtype {
-	    case MSG_DATA, MSG_ACK, MSG_KEEP:
+	    case MSG_DATA, MSG_ACK, MSG_KEEP, MSG_NEXT:
 		if s.running && msg.key == s.key {
 		    s.mq <- msg
 		}
