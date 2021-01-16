@@ -112,6 +112,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     dlseq := 0
     dupack := 0
     inflight := 0
+    fastrewindack := 0
     resend := time.Duration(100)
     ultime := time.Now()
     ackq := make(chan bool, 32)
@@ -244,12 +245,15 @@ func (s *Stream)Runner(queue chan<- []byte) {
 			dupack = 0
 		    }
 		    if dupack >= 5 {
-			s.Tracef("fast rewind %d to %d ack %d (%d) inflight %d\n", ulptr, ulstart, ulseq, lastseq, inflight)
-			ulptr = ulstart
-			ulskip = true
-			nr_rewind++
-			dupack = 0
-			inflight = 0
+			if fastrewindack != ulack {
+			    s.Tracef("fast rewind %d to %d ack %d (%d) inflight %d\n", ulptr, ulstart, ulseq, lastseq, inflight)
+			    ulptr = ulstart
+			    ulskip = true
+			    nr_rewind++
+			    dupack = 0
+			    inflight = 0
+			    fastrewindack = ulack
+			}
 		    }
 		    ulack = msg.seq0
 		    ulseq = ulack
