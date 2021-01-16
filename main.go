@@ -45,6 +45,7 @@ type Stream struct {
     bell chan bool // doorbell
     sendq chan []byte
     recvq chan []byte
+    recvq_enq, recvq_deq int
     established bool
     recv []byte
     rmtx sync.Mutex
@@ -161,7 +162,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		seq1: seq1,
 	    }
 	    msg.data = ulbuf[offset:offset+datalen]
-	    s.Tracef("Push Data seq %d-%d\n", seq0, seq1)
+	    s.Tracef("Push Data seq %d-%d [%d]\n", seq0, seq1, msg.data[0])
 	    buf := msg.Pack()
 	    queue <- buf
 	    ulptr = seq1
@@ -176,13 +177,14 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    s.established = true
 	    switch msg.mtype {
 	    case MSG_DATA:
-		s.Tracef("MSG: Data seq %d-%d\n", msg.seq0, msg.seq1)
+		s.Tracef("MSG: Data seq %d-%d [%d]\n", msg.seq0, msg.seq1, msg.data[0])
 		if msg.seq0 == dlseq {
 		    if ackseq != msg.seq1 {
-			s.Tracef("Change ackseq %d->%d\n", ackseq, msg.seq1)
+			s.Tracef("Change ackseq %d to %d\n", ackseq, msg.seq1)
 		    }
 		    s.recvq <- msg.data
-		    s.Tracef("recvq: enqueue %d bytes\n", len(msg.data))
+		    s.Tracef("recvq: enqueue %d bytes %d\n", len(msg.data), s.recvq_enq)
+		    s.recvq_enq += len(msg.data)
 		    dlseq = msg.seq1
 		    ackseq = msg.seq1
 		}
@@ -205,7 +207,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    // must wait a bit
 	    if time.Now().After(ultime) {
 		if ulseq != lastseq {
-		    s.Tracef("rewind %d->%d (%d)\n", ulptr, ulseq, lastseq)
+		    s.Tracef("rewind %d to %d (%d)\n", ulptr, ulseq, lastseq)
 		    ulptr = ulseq
 		    nr_rewind++
 		}
@@ -315,7 +317,8 @@ func (s *Stream)Read(buf []byte) (int, error) {
 	}
 	s.recv = next
 	if s.recv != nil {
-	    s.Tracef("recvq: dequeue %d bytes\n", len(s.recv))
+	    s.Tracef("recvq: dequeue %d bytes %d\n", len(s.recv), s.recvq_deq)
+	    s.recvq_deq += len(s.recv)
 	}
     }
     // try to recv more
@@ -1090,6 +1093,11 @@ func main() {
 	mw := io.MultiWriter(os.Stderr, f)
 	log.SetOutput(mw)
 	log.SetLevel(log.DebugLevel)
+    } else if args[1] == "-d" {
+	args = args[1:]
+	mw := io.MultiWriter(os.Stderr, f)
+	log.SetOutput(mw)
+	log.SetLevel(log.TraceLevel)
     } else {
 	log.SetOutput(f)
 	log.SetLevel(log.InfoLevel)
