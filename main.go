@@ -110,6 +110,8 @@ func (s *Stream)Runner(queue chan<- []byte) {
     lastseq := 0
     ackflag := false
     dlseq := 0
+    dupack := 0
+    resend := time.Duration(100)
     ultime := time.Now()
     ackq := make(chan bool, 32)
     ticker := time.NewTicker(time.Second)
@@ -119,8 +121,9 @@ func (s *Stream)Runner(queue chan<- []byte) {
     nr_append := 0
     nr_rewind := 0
     nr_badack := 0
+    msgsz := 32768 + 16384
     for s.running {
-	if pendingbuf == nil || len(pendingbuf) < 32768 {
+	if pendingbuf == nil || len(pendingbuf) < msgsz {
 	    select {
 	    case next := <-s.sendq:
 		s.Tracef("dequeue %d bytes (current %d, pending %d)\n", len(next), buflen, len(pendingbuf))
@@ -142,14 +145,15 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		ulskip = false
 		lastseq = (ulseq + buflen) % 65536
 		pendingbuf = nil
+		resend = 100
 		s.Tracef("replace buffer lastseq=%d (prev %d)\n", lastseq, ulack)
 		nr_replace++
 	    }
 	}
 	offset := 0
 	if ulptr != lastseq {
-	    ultime = time.Now().Add(250 * time.Millisecond)
-	    ticker.Reset(100 * time.Millisecond)
+	    ultime = time.Now().Add(time.Millisecond * resend)
+	    ticker.Reset(resend * time.Millisecond)
 	}
 	for ulptr != lastseq {
 	    datalen := ((lastseq + 65536) - ulptr) % 65536
@@ -206,7 +210,19 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    case MSG_ACK:
 		s.Tracef("MSG: Ack seq %d-%d\n", msg.seq0, msg.seq1)
 		diff := (65536 + msg.seq0 - ulack) % 65536
-		if diff < 32768 {
+		if diff < msgsz + 4096 {
+		    if ulack == msg.seq0 {
+			dupack++
+		    } else {
+			dupack = 0
+		    }
+		    if dupack >= 5 {
+			s.Tracef("fast rewind %d to %d ack %d (%d)\n", ulptr, ulstart, ulseq, lastseq)
+			ulptr = ulstart
+			ulskip = true
+			nr_rewind++
+			dupack = 0
+		    }
 		    ulack = msg.seq0
 		    ulseq = ulack
 		} else {
@@ -222,6 +238,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    ulptr = ulstart
 		    ulskip = true
 		    nr_rewind++
+		    resend += 100
 		}
 	    }
 	    // keep alive
