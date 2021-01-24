@@ -1001,35 +1001,6 @@ func check(laddr, raddr string) {
     fmt.Printf("Remote %s\n", string(buf[:n]))
 }
 
-func start_dummy_server(s *Stream) {
-    s.Logf("start dummy\n")
-    // dummy reader
-    go func() {
-	buf := make([]byte, RDWRSZ)
-	cnt := 0
-	for s.running {
-	    n, _ := s.Read(buf)
-	    s.Tracef("recv %d bytes\n", n)
-	    // check count
-	    for i := 0; i < n; i++ {
-		if buf[i] != byte(cnt) {
-		    s.Tracef("mismatch buf[%d]=%d != %d\n", i, buf[i], cnt)
-		    cnt = int(buf[i])
-		}
-		cnt = (cnt + 1) % 256
-	    }
-	}
-    }()
-    // dummy writer
-    go func() {
-	for s.running {
-	    time.Sleep(time.Minute)
-	    msg := "message from server"
-	    s.Write([]byte(msg))
-	}
-    }()
-}
-
 func server(listen string, reqs []string) {
     u, err := NewUDPConn()
     if err != nil {
