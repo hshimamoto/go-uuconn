@@ -161,6 +161,7 @@ type Stream struct {
     recv []byte
     rmtx sync.Mutex
     wmtx sync.Mutex
+    now_reading bool
 }
 
 func NewStream(sid, sz int) *Stream {
@@ -184,6 +185,7 @@ func (s *Stream)Init(key int) {
     s.sendq = make(chan []byte, 32)
     s.recvq = make(chan []byte, 32)
     s.bell = make(chan bool, 32)
+    s.now_reading = false
 }
 
 func (s *Stream)Tracef(fmt string, a ...interface{}) {
@@ -456,6 +458,11 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	}
     }
     ticker.Stop()
+    //
+    if s.now_reading {
+	s.recvq <- []byte("")
+	s.Logf("push empty buf to stop Read\n")
+    }
     // clear queue
     s.key = -1
     time.Sleep(time.Second)
@@ -499,7 +506,11 @@ func (s *Stream)StartRunner(queue chan<- []byte) {
 
 func (s *Stream)Read(buf []byte) (int, error) {
     s.rmtx.Lock()
-    defer s.rmtx.Unlock()
+    s.now_reading = true
+    defer func() {
+	s.now_reading = false
+	s.rmtx.Unlock()
+    }()
     for s.recv == nil {
 	next := []byte(nil)
 	select {
@@ -517,6 +528,9 @@ func (s *Stream)Read(buf []byte) (int, error) {
 	    s.Tracef("recvq: dequeue %d bytes %d\n", len(s.recv), s.recvq_deq)
 	    s.recvq_deq += len(s.recv)
 	}
+    }
+    if s.recv != nil && len(s.recv) == 0 {
+	return 0, io.EOF
     }
     // try to recv more
     if len(s.recv) < len(buf) {
