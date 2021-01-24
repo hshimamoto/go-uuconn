@@ -645,8 +645,10 @@ func remote_handler(s *Stream, remote string) {
 	s.Logf("Dial error %v\n", err)
 	return
     }
+    log.Printf("connected to %s\n", remote)
     // conn will be closed in writer side
     // reader side
+    reader_alive := true
     go func() {
 	buf := make([]byte, RDWRSZ)
 	for s.running {
@@ -667,6 +669,7 @@ func remote_handler(s *Stream, remote string) {
 	}
 	s.Logf("try to stop stream (reader side)\n")
 	s.running = false
+	reader_alive = false
     }()
     // writer side
     go func() {
@@ -688,7 +691,12 @@ func remote_handler(s *Stream, remote string) {
 	s.running = false
 	// wait a bit before closing conn
 	time.Sleep(time.Second)
+	for reader_alive {
+	    s.Logf("wait to stop reader side\n")
+	    time.Sleep(time.Second)
+	}
 	conn.Close()
+	s.Logf("finish remote_handler")
     }()
 }
 
