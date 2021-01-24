@@ -1080,6 +1080,7 @@ func NewLocalServer(u *UDPconn, listen, remote string) (*LocalServer, error) {
 	    return
 	}
 	// reader in this stream
+	reader_alive := true
 	go func() {
 	    buf := make([]byte, RDWRSZ)
 	    for s.running {
@@ -1101,6 +1102,7 @@ func NewLocalServer(u *UDPconn, listen, remote string) (*LocalServer, error) {
 	    // stop stream
 	    s.Logf("try to stop stream (reader side)\n")
 	    s.running = false
+	    reader_alive = false
 	}()
 	for s.running {
 	    buf := make([]byte, RDWRSZ)
@@ -1120,7 +1122,11 @@ func NewLocalServer(u *UDPconn, listen, remote string) (*LocalServer, error) {
 	s.Logf("try to stop stream (writer side)\n")
 	s.running = false
 	// wait a bit before closing conn
-	time.Sleep(time.Second)
+	for reader_alive {
+	    s.Logf("wait to stop reader side\n")
+	    time.Sleep(time.Second)
+	}
+	s.Logf("finish localserver")
     })
     if err != nil {
 	return nil, err
