@@ -75,14 +75,13 @@ func (b *Blob)MessageSetup(s *Stream, pb *Blob, blkid int) {
 	    key: s.key,
 	    blkid: b.blkid,
 	    seq0: seq0,
-	    seq1: seq1,
 	}
 	msg.data = make([]byte, datalen)
 	copy(msg.data, b.data[offset:offset+datalen])
 	//msg.data = b.data[offset:offset+datalen]
 	b.msgs = append(b.msgs, msg)
 	offset += datalen
-	ptr = msg.seq1
+	ptr = seq1
     }
     s.Tracef("setup %d msgs\n", len(b.msgs))
     b.ready = true
@@ -90,10 +89,11 @@ func (b *Blob)MessageSetup(s *Stream, pb *Blob, blkid int) {
 
 func (b *Blob)Transfer(s *Stream, queue chan<- []byte) {
     for _, msg := range b.msgs {
-	s.Tracef("Push Data seq %d-%d [%d]\n", msg.seq0, msg.seq1, msg.data[0])
+	seq1 := (msg.seq0 + len(msg.data)) % 65536
+	s.Tracef("Push Data seq %d-%d [%d]\n", msg.seq0, seq1, msg.data[0])
 	queue <- msg.Pack()
 	b.inflight++
-	b.ptr = msg.seq1
+	b.ptr = seq1
     }
 }
 
@@ -111,9 +111,10 @@ func (b *Blob)Rebuild(s *Stream) {
     b.msgs = []*Message{}
     skip := true
     for _, msg := range msgs {
+	seq1 := (msg.seq0 + len(msg.data)) % 65536
 	if skip {
-	    s.Tracef("drop %d-%d\n", msg.seq0, msg.seq1)
-	    if msg.seq1 == b.ack {
+	    s.Tracef("drop %d\n", msg.seq0)
+	    if seq1 == b.ack {
 		skip = false
 	    }
 	    continue
@@ -121,7 +122,7 @@ func (b *Blob)Rebuild(s *Stream) {
 	hit := false
 	for _, sack := range b.sacks {
 	    if msg.seq0 == sack {
-		s.Tracef("sack drop %d-%d\n", msg.seq0, msg.seq1)
+		s.Tracef("sack drop %d\n", msg.seq0)
 		hit = true
 		break
 	    }
@@ -129,7 +130,7 @@ func (b *Blob)Rebuild(s *Stream) {
 	if hit {
 	    continue
 	}
-	s.Tracef("requeue %d-%d\n", msg.seq0, msg.seq1)
+	s.Tracef("requeue %d\n", msg.seq0)
 	b.msgs = append(b.msgs, msg)
     }
     if len(b.msgs) == 0 {
@@ -282,7 +283,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    sid: s.sid,
 		    key: s.key,
 		    seq0: 0,
-		    seq1: 0,
 		}
 		queue <- msg.Pack()
 	    }
@@ -302,16 +302,17 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    s.established = true
 	    switch msg.mtype {
 	    case MSG_DATA:
-		s.Tracef("MSG: Data seq %d-%d [%d]\n", msg.seq0, msg.seq1, msg.data[0])
+		seq1 := (msg.seq0 + len(msg.data)) % 65536
+		s.Tracef("MSG: Data seq %d-%d [%d]\n", msg.seq0, seq1, msg.data[0])
 		if msg.seq0 == dlseq {
-		    if ackseq != msg.seq1 {
-			s.Tracef("Change ackseq %d to %d\n", ackseq, msg.seq1)
+		    if ackseq != seq1 {
+			s.Tracef("Change ackseq %d to %d\n", ackseq, seq1)
 		    }
 		    s.recvq <- msg.data
 		    s.Tracef("recvq: enqueue %d bytes %d\n", len(msg.data), s.recvq_enq)
 		    s.recvq_enq += len(msg.data)
-		    dlseq = msg.seq1
-		    ackseq = msg.seq1
+		    dlseq = seq1
+		    ackseq = seq1
 		    ackblkid = msg.blkid
 		    // check pool
 		    retry := len(pool) > 0
@@ -323,15 +324,16 @@ func (s *Stream)Runner(queue chan<- []byte) {
 			    if m.blkid != ackblkid {
 				continue
 			    }
+			    mseq1 := (m.seq0 + len(m.data)) % 65536
 			    if m.seq0 == dlseq {
-				if ackseq != m.seq1 {
-				    s.Tracef("Change ackseq %d to %d [pool]\n", ackseq, m.seq1)
+				if ackseq != mseq1 {
+				    s.Tracef("Change ackseq %d to %d [pool]\n", ackseq, mseq1)
 				}
 				s.recvq <- m.data
 				s.Tracef("recvq: enqueue %d bytes %d\n", len(m.data), s.recvq_enq)
 				s.recvq_enq += len(m.data)
-				dlseq = m.seq1
-				ackseq = m.seq1
+				dlseq = mseq1
+				ackseq = mseq1
 				retry = true
 				continue
 			    }
@@ -350,7 +352,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    }
 		    if !hit {
 			pool = append(pool, msg)
-			s.Tracef("pool %d-%d\n", msg.seq0, msg.seq1)
+			s.Tracef("pool %d-%d\n", msg.seq0)
 		    }
 		}
 		if ackflag == false {
@@ -358,7 +360,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    ackflag = true
 		}
 	    case MSG_ACK:
-		s.Tracef("MSG: Ack seq %d-%d %d\n", msg.seq0, msg.seq1, len(msg.data))
+		s.Tracef("MSG: Ack seq %d %d\n", msg.seq0, len(msg.data))
 		// show sack
 		sack := []int{}
 		for n := 0; n < len(msg.data); n += 2 {
@@ -411,7 +413,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    sid: s.sid,
 		    key: s.key,
 		    seq0: 0,
-		    seq1: 0,
 		}
 		queue <- keep.Pack()
 		keepalive = time.Now().Add(10 * time.Second)
@@ -442,7 +443,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		key: s.key,
 		blkid: ackblkid,
 		seq0: ackseq,
-		seq1: ackseq,
 	    }
 	    // sack
 	    sacklen := len(pool) * 2
@@ -580,7 +580,7 @@ type Message struct {
     sid int
     key int
     blkid int
-    seq0, seq1 int
+    seq0 int
     data []byte
 }
 
@@ -602,7 +602,6 @@ func (m *Message)Pack() []byte {
     binary.LittleEndian.PutUint16(buf[2:], uint16(m.key))
     binary.LittleEndian.PutUint16(buf[4:], uint16(m.blkid))
     binary.LittleEndian.PutUint16(buf[6:], uint16(m.seq0))
-    binary.LittleEndian.PutUint16(buf[8:], uint16(m.seq1))
     copy(buf[10:], m.data)
     return buf
 }
@@ -617,7 +616,6 @@ func ParseMessage(buf []byte) *Message {
     msg.key = int(binary.LittleEndian.Uint16(buf[2:]))
     msg.blkid = int(binary.LittleEndian.Uint16(buf[4:]))
     msg.seq0 = int(binary.LittleEndian.Uint16(buf[6:]))
-    msg.seq1 = int(binary.LittleEndian.Uint16(buf[8:]))
     msg.data = make([]byte, len(buf[10:]))
     copy(msg.data, buf[10:])
     return msg
@@ -767,7 +765,6 @@ func (r *UDPremote)OpenStream(remote string) *Stream {
 	    sid: s.sid,
 	    key: s.key,
 	    seq0: len(remote),
-	    seq1: len(remote),
 	    data: []byte(remote),
 	}
 	r.queue <- msg.Pack()
@@ -872,7 +869,6 @@ func (r *UDPremote)Receiver() {
 		    sid: sid,
 		    key: s.key,
 		    seq0: 0,
-		    seq1: 0,
 		}
 		log.Printf("ack for OPEN %d %d by keep\n", msg.sid, msg.key)
 		r.queue <- keep.Pack()
