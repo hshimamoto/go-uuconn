@@ -40,7 +40,8 @@ type Blob struct {
     data []byte
     // seq
     first, last int
-    ptr, ack int
+    ack int
+    sent bool
     inflight int
     blkid int
     ready bool
@@ -57,7 +58,7 @@ func (b *Blob)MessageSetup(s *Stream, pb *Blob, blkid int) {
     blen := len(b.data)
     b.first = prev
     b.last = (prev + blen) % SEQMAX
-    b.ptr = prev
+    b.sent = false
     b.ack = prev
     b.blkid = blkid
     b.inflight = 0
@@ -95,8 +96,8 @@ func (b *Blob)Transfer(s *Stream, queue chan<- []byte) {
 	s.Tracef("Push Data seq %d-%d [%d]\n", msg.seq0, seq1, msg.data[0])
 	queue <- msg.Pack()
 	b.inflight++
-	b.ptr = seq1
     }
+    b.sent = true
 }
 
 func (b *Blob)Ack(s *Stream, ack int, sacks []int) {
@@ -142,9 +143,9 @@ func (b *Blob)Rebuild(s *Stream) {
 }
 
 func (b *Blob)Rewind(s *Stream, t string) {
-    s.Tracef("%s rewind %d to %d ack %d (%d) inflight %d\n", t, b.ptr, b.first, b.ack, b.last, b.inflight)
+    s.Tracef("%s rewind to %d ack %d (%d) inflight %d\n", t, b.first, b.ack, b.last, b.inflight)
     b.Rebuild(s)
-    b.ptr = b.ack
+    b.sent = false
     b.inflight = 0
 }
 
@@ -218,7 +219,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
     b = &Blob{}
     b.first = 0
     b.last = 0
-    b.ptr = 0
     b.ack = 0
     b.inflight = 0
     pending = nil
@@ -289,7 +289,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		queue <- msg.Pack()
 	    }
 	}
-	if b.ptr != b.last {
+	if !b.sent {
 	    ultime = time.Now().Add(time.Millisecond * resend)
 	    ticker.Reset(resend * time.Millisecond)
 	    //
