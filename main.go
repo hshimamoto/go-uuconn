@@ -228,6 +228,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     b.ack = 0
     b.inflight = 0
     pending = nil
+    pendingqueue := []*Blob{}
     // local variables
     blkid := 0
     ackseq := 0
@@ -249,7 +250,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     pool := []*Message{}
     msgsz := SEQMAX - (RDWRSZ * 2)
     for s.running {
-	if pending == nil || pending.ready == false {
+	if len(pendingqueue) < 8 {
 	    select {
 	    case next := <-s.sendq:
 		blen := 0
@@ -269,18 +270,24 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    blkid++
 		}
 		if len(pending.data) >= msgsz {
-		    pending.MessageSetup(s, b)
-		    // and now pending.ready is true
+		    pendingqueue = append(pendingqueue, pending)
+		    pending = nil
 		}
 	    default:
 	    }
 	}
-	if pending != nil {
-	    if b.ack == b.last {
-		pending.MessageSetup(s, b)
-		// replace
-		b = pending
+	if b.ack == b.last {
+	    next := pending
+	    if len(pendingqueue) > 0 {
+		next = pendingqueue[0]
+		pendingqueue = pendingqueue[1:]
+	    } else {
 		pending = nil
+	    }
+	    if next != nil {
+		next.MessageSetup(s, b)
+		// replace
+		b = next
 		// rest
 		resend = 100
 		s.Tracef("replace blob last=%d (prev %d)\n", b.last, b.first)
