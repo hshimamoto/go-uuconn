@@ -368,7 +368,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    if !hit {
 			if len(pool) < 100 {
 			    pool = append(pool, msg)
-			    s.Tracef("pool %d-%d\n", msg.seq0)
+			    s.Tracef("pool %d\n", msg.seq0)
 			}
 		    }
 		}
