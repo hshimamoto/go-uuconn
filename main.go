@@ -19,7 +19,7 @@ import (
 const MSS int = 1280
 const RDWRSZ int = 4096
 
-const SEQMAX int = 65536
+const SEQMAX int = 16777216
 
 type StreamBuffer struct {
     buf []byte
@@ -241,7 +241,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     nr_rewind := 0
     nr_badack := 0
     pool := []*Message{}
-    msgsz := 32768 + 16384
+    msgsz := SEQMAX - 16384
     for s.running {
 	if pending == nil || pending.ready == false {
 	    select {
