@@ -50,7 +50,14 @@ type Blob struct {
     sacks []int
 }
 
-func (b *Blob)MessageSetup(s *Stream, pb *Blob, blkid int) {
+func NewBlob(blkid int, data []byte) *Blob {
+    b := &Blob{}
+    b.blkid = blkid
+    b.data = data
+    return b
+}
+
+func (b *Blob)MessageSetup(s *Stream, pb *Blob) {
     if b.ready {
 	return
     }
@@ -60,7 +67,6 @@ func (b *Blob)MessageSetup(s *Stream, pb *Blob, blkid int) {
     b.last = (prev + blen) % SEQMAX
     b.sent = false
     b.ack = prev
-    b.blkid = blkid
     b.inflight = 0
     b.msgs = []*Message{}
     offset := 0
@@ -259,11 +265,11 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    pending.data = append(pending.data, next...)
 		    nr_append++
 		} else {
-		    pending = &Blob{ data: next }
+		    pending = NewBlob(blkid, next)
 		    blkid++
 		}
 		if len(pending.data) >= msgsz {
-		    pending.MessageSetup(s, b, blkid)
+		    pending.MessageSetup(s, b)
 		    // and now pending.ready is true
 		}
 	    default:
@@ -271,7 +277,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	}
 	if pending != nil {
 	    if b.ack == b.last {
-		pending.MessageSetup(s, b, blkid)
+		pending.MessageSetup(s, b)
 		// replace
 		b = pending
 		pending = nil
