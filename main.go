@@ -597,13 +597,13 @@ const MSG_NEXT	int = 0x4e // Next
 
 func (m *Message)Pack() []byte {
     datalen := len(m.data)
-    msglen := 1 + 1 + 2 + 2 + 2 + 2 + datalen
+    msglen := 1 + 1 + 2 + 2 + 4 + datalen
     buf := make([]byte, msglen)
     buf[0] = byte(m.mtype)
     buf[1] = byte(m.sid)
     binary.LittleEndian.PutUint16(buf[2:], uint16(m.key))
     binary.LittleEndian.PutUint16(buf[4:], uint16(m.blkid))
-    binary.LittleEndian.PutUint16(buf[6:], uint16(m.seq0))
+    binary.LittleEndian.PutUint32(buf[6:], uint32(m.seq0))
     copy(buf[10:], m.data)
     return buf
 }
@@ -617,7 +617,7 @@ func ParseMessage(buf []byte) *Message {
     }
     msg.key = int(binary.LittleEndian.Uint16(buf[2:]))
     msg.blkid = int(binary.LittleEndian.Uint16(buf[4:]))
-    msg.seq0 = int(binary.LittleEndian.Uint16(buf[6:]))
+    msg.seq0 = int(binary.LittleEndian.Uint32(buf[6:]))
     msg.data = make([]byte, len(buf[10:]))
     copy(msg.data, buf[10:])
     return msg
