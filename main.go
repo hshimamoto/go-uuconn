@@ -248,7 +248,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     nr_rewind := 0
     nr_badack := 0
     pool := []*Message{}
-    msgsz := SEQMAX - (RDWRSZ * 2)
+    msgsz := (SEQMAX / 2) - (RDWRSZ * 2)
     for s.running {
 	if len(pendingqueue) < 8 {
 	    select {
@@ -366,8 +366,10 @@ func (s *Stream)Runner(queue chan<- []byte) {
 			}
 		    }
 		    if !hit {
-			pool = append(pool, msg)
-			s.Tracef("pool %d-%d\n", msg.seq0)
+			if len(pool) < 100 {
+			    pool = append(pool, msg)
+			    s.Tracef("pool %d-%d\n", msg.seq0)
+			}
 		    }
 		}
 		if ackflag == false {
@@ -378,8 +380,8 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		s.Tracef("MSG: Ack seq %d %d\n", msg.seq0, len(msg.data))
 		// show sack
 		sack := []int{}
-		for n := 0; n < len(msg.data); n += 2 {
-		    seq := int(binary.LittleEndian.Uint16(msg.data[n:]))
+		for n := 0; n < len(msg.data); n += 4 {
+		    seq := int(binary.LittleEndian.Uint32(msg.data[n:]))
 		    diff := (SEQMAX + seq - b.first) % SEQMAX
 		    if diff < msgsz + RDWRSZ {
 			s.Tracef("sack %d\n", seq)
@@ -460,10 +462,10 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		seq0: ackseq,
 	    }
 	    // sack
-	    sacklen := len(pool) * 2
+	    sacklen := len(pool) * 4
 	    msg.data = make([]byte, sacklen)
 	    for i, m := range pool {
-		binary.LittleEndian.PutUint16(msg.data[i*2:], uint16(m.seq0))
+		binary.LittleEndian.PutUint32(msg.data[i*4:], uint32(m.seq0))
 	    }
 	    buf := msg.Pack()
 	    queue <- buf
