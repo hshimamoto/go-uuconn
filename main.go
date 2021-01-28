@@ -19,6 +19,8 @@ import (
 const MSS int = 1280
 const RDWRSZ int = 4096
 
+const SEQMAX int = 65536
+
 type StreamBuffer struct {
     buf []byte
     sz int
@@ -54,7 +56,7 @@ func (b *Blob)MessageSetup(s *Stream, pb *Blob, blkid int) {
     prev := pb.last
     blen := len(b.data)
     b.first = prev
-    b.last = (prev + blen) % 65536
+    b.last = (prev + blen) % SEQMAX
     b.ptr = prev
     b.ack = prev
     b.blkid = blkid
@@ -63,12 +65,12 @@ func (b *Blob)MessageSetup(s *Stream, pb *Blob, blkid int) {
     offset := 0
     ptr := b.first
     for ptr != b.last {
-	datalen := ((b.last + 65536) - ptr) % 65536
+	datalen := ((b.last + SEQMAX) - ptr) % SEQMAX
 	if datalen > MSS {
 	    datalen = MSS
 	}
-	seq0 := (b.first + offset) % 65536
-	seq1 := (b.first + offset + datalen) % 65536
+	seq0 := (b.first + offset) % SEQMAX
+	seq1 := (b.first + offset + datalen) % SEQMAX
 	msg := &Message{
 	    mtype: MSG_DATA,
 	    sid: s.sid,
@@ -89,7 +91,7 @@ func (b *Blob)MessageSetup(s *Stream, pb *Blob, blkid int) {
 
 func (b *Blob)Transfer(s *Stream, queue chan<- []byte) {
     for _, msg := range b.msgs {
-	seq1 := (msg.seq0 + len(msg.data)) % 65536
+	seq1 := (msg.seq0 + len(msg.data)) % SEQMAX
 	s.Tracef("Push Data seq %d-%d [%d]\n", msg.seq0, seq1, msg.data[0])
 	queue <- msg.Pack()
 	b.inflight++
@@ -111,7 +113,7 @@ func (b *Blob)Rebuild(s *Stream) {
     b.msgs = []*Message{}
     skip := true
     for _, msg := range msgs {
-	seq1 := (msg.seq0 + len(msg.data)) % 65536
+	seq1 := (msg.seq0 + len(msg.data)) % SEQMAX
 	if skip {
 	    s.Tracef("drop %d\n", msg.seq0)
 	    if seq1 == b.ack {
@@ -302,7 +304,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    s.established = true
 	    switch msg.mtype {
 	    case MSG_DATA:
-		seq1 := (msg.seq0 + len(msg.data)) % 65536
+		seq1 := (msg.seq0 + len(msg.data)) % SEQMAX
 		s.Tracef("MSG: Data seq %d-%d [%d]\n", msg.seq0, seq1, msg.data[0])
 		if msg.seq0 == dlseq {
 		    if ackseq != seq1 {
@@ -324,7 +326,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 			    if m.blkid != ackblkid {
 				continue
 			    }
-			    mseq1 := (m.seq0 + len(m.data)) % 65536
+			    mseq1 := (m.seq0 + len(m.data)) % SEQMAX
 			    if m.seq0 == dlseq {
 				if ackseq != mseq1 {
 				    s.Tracef("Change ackseq %d to %d [pool]\n", ackseq, mseq1)
@@ -365,7 +367,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		sack := []int{}
 		for n := 0; n < len(msg.data); n += 2 {
 		    seq := int(binary.LittleEndian.Uint16(msg.data[n:]))
-		    diff := (65536 + seq - b.first) % 65536
+		    diff := (SEQMAX + seq - b.first) % SEQMAX
 		    if diff < msgsz + 4096 {
 			s.Tracef("sack %d\n", seq)
 			sack = append(sack, seq)
@@ -373,7 +375,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 			s.Tracef("sack %d invalid\n", seq)
 		    }
 		}
-		diff := (65536 + msg.seq0 - b.ack) % 65536
+		diff := (SEQMAX + msg.seq0 - b.ack) % SEQMAX
 		if diff < msgsz + 4096 {
 		    if b.ack == msg.seq0 {
 			dupack++
