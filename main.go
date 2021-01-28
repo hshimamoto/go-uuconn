@@ -17,7 +17,7 @@ import (
 )
 
 const MSS int = 1280
-const RDWRSZ int = 4096
+const RDWRSZ int = 8192
 
 const SEQMAX int = 16777216
 
@@ -241,7 +241,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     nr_rewind := 0
     nr_badack := 0
     pool := []*Message{}
-    msgsz := SEQMAX - 16384
+    msgsz := SEQMAX - (RDWRSZ * 2)
     for s.running {
 	if pending == nil || pending.ready == false {
 	    select {
@@ -262,7 +262,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    pending = &Blob{ data: next }
 		    blkid++
 		}
-		if len(pending.data) > msgsz {
+		if len(pending.data) >= msgsz {
 		    pending.MessageSetup(s, b, blkid)
 		    // and now pending.ready is true
 		}
@@ -368,7 +368,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		for n := 0; n < len(msg.data); n += 2 {
 		    seq := int(binary.LittleEndian.Uint16(msg.data[n:]))
 		    diff := (SEQMAX + seq - b.first) % SEQMAX
-		    if diff < msgsz + 4096 {
+		    if diff < msgsz + RDWRSZ {
 			s.Tracef("sack %d\n", seq)
 			sack = append(sack, seq)
 		    } else {
@@ -376,7 +376,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    }
 		}
 		diff := (SEQMAX + msg.seq0 - b.ack) % SEQMAX
-		if diff < msgsz + 4096 {
+		if diff < msgsz + RDWRSZ {
 		    if b.ack == msg.seq0 {
 			dupack++
 		    } else {
