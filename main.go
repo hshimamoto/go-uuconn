@@ -282,7 +282,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		// replace
 		b = next
 		// rest
-		resend = 100
+		resend = 20
 		s.Tracef("replace blob last=%d (prev %d)\n", b.last, b.first)
 		nr_replace++
 		// send NEXT for drop pool
@@ -296,10 +296,10 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    }
 	}
 	if !b.sent {
+	    b.Transfer(s, queue)
+	    //
 	    ultime = time.Now().Add(time.Millisecond * resend)
 	    ticker.Reset(resend * time.Millisecond)
-	    //
-	    b.Transfer(s, queue)
 	}
 	select {
 	case msg := <-s.mq:
