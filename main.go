@@ -398,7 +398,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		    } else {
 			dupack = 0
 		    }
-		    if dupack >= 5 {
+		    if dupack >= 3 {
 			if fastrewindack != b.ack {
 			    b.Rewind(s, "fast")
 			    nr_rewind++
