@@ -17,7 +17,7 @@ import (
 )
 
 const MSS int = 1280
-const RDWRSZ int = 8192
+const RDWRSZ int = 32 * 1024
 
 const SEQMAX int = 16777216
 
@@ -248,7 +248,8 @@ func (s *Stream)Runner(queue chan<- []byte) {
     nr_rewind := 0
     nr_badack := 0
     pool := []*Message{}
-    msgsz := (SEQMAX / 2) - (RDWRSZ * 2)
+    //msgsz := (SEQMAX / 2) - (RDWRSZ * 2)
+    msgsz := 64 * 1024
     for s.running {
 	if len(pendingqueue) < 8 {
 	    select {
