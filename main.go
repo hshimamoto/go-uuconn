@@ -127,6 +127,14 @@ func (b *Blob)Ack(s *Stream, ack int, sacks []int) {
     b.ack = ack
     b.sacks = sacks
     for _, msg := range b.msgs {
+	if msg.ack {
+	    continue
+	}
+	diff := (SEQMAX + msg.seq0 - b.ack) % SEQMAX
+	if diff >= (SEQMAX/2) {
+	    msg.ack = true
+	    continue
+	}
 	seq1 := (msg.seq0 + len(msg.data)) % SEQMAX
 	if seq1 == ack {
 	    msg.ack = true
