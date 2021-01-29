@@ -238,7 +238,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
     dupack := 0
     fastrewindack := 0
     resend := time.Duration(100)
-    ultime := time.Now()
+    ultime := time.Now().Add(time.Second)
     ackq := make(chan bool, 32)
     ticker := time.NewTicker(time.Second)
     lastrecv := time.Now().Add(time.Minute)
@@ -306,6 +306,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	if !b.sent {
 	    b.Transfer(s, queue)
 	    //
+	    resend += time.Duration(b.inflight)
 	    ultime = time.Now().Add(time.Millisecond * resend)
 	    ticker.Reset(resend * time.Millisecond)
 	}
