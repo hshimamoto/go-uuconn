@@ -87,7 +87,7 @@ func (b *Blob)MessageSetup(s *Stream, pb *Blob) {
 	}
 	msg.data = make([]byte, datalen)
 	copy(msg.data, b.data[offset:offset+datalen])
-	//msg.data = b.data[offset:offset+datalen]
+	msg.ack = false
 	b.msgs = append(b.msgs, msg)
 	offset += datalen
 	ptr = seq1
@@ -98,10 +98,27 @@ func (b *Blob)MessageSetup(s *Stream, pb *Blob) {
 
 func (b *Blob)Transfer(s *Stream, queue chan<- []byte) {
     for _, msg := range b.msgs {
+	if msg.ack {
+	    continue
+	}
 	seq1 := (msg.seq0 + len(msg.data)) % SEQMAX
 	s.Tracef("Push Data seq %d-%d [%d]\n", msg.seq0, seq1, msg.data[0])
 	queue <- msg.Pack()
 	b.inflight++
+    }
+    if b.inflight == 0 {
+	s.Tracef("no msgs, something wrong\n")
+	for _, msg := range b.msgs {
+	    diff := (SEQMAX + msg.seq0 - b.ack) % SEQMAX
+	    if diff >= (SEQMAX/2) {
+		continue
+	    }
+	    msg.ack = false
+	    seq1 := (msg.seq0 + len(msg.data)) % SEQMAX
+	    s.Tracef("Push Data seq %d-%d [%d]\n", msg.seq0, seq1, msg.data[0])
+	    queue <- msg.Pack()
+	    b.inflight++
+	}
     }
     b.sent = true
 }
@@ -109,48 +126,22 @@ func (b *Blob)Transfer(s *Stream, queue chan<- []byte) {
 func (b *Blob)Ack(s *Stream, ack int, sacks []int) {
     b.ack = ack
     b.sacks = sacks
-}
-
-func (b *Blob)Rebuild(s *Stream) {
-    // don't rebuild small number of msgs
-    if len(b.msgs) < 3 {
-	return
-    }
-    msgs := b.msgs
-    b.msgs = []*Message{}
-    skip := true
-    for _, msg := range msgs {
-	seq1 := (msg.seq0 + len(msg.data)) % SEQMAX
-	if skip {
-	    s.Tracef("drop %d\n", msg.seq0)
-	    if seq1 == b.ack {
-		skip = false
-	    }
+    for _, msg := range b.msgs {
+	if msg.seq0 == ack {
+	    msg.ack = true
 	    continue
 	}
-	hit := false
 	for _, sack := range b.sacks {
 	    if msg.seq0 == sack {
-		s.Tracef("sack drop %d\n", msg.seq0)
-		hit = true
+		msg.ack = true
 		break
 	    }
 	}
-	if hit {
-	    continue
-	}
-	s.Tracef("requeue %d\n", msg.seq0)
-	b.msgs = append(b.msgs, msg)
-    }
-    if len(b.msgs) == 0 {
-	s.Tracef("unable to drop\n")
-	b.msgs = msgs
     }
 }
 
 func (b *Blob)Rewind(s *Stream, t string) {
     s.Tracef("%s rewind to %d ack %d (%d) inflight %d\n", t, b.first, b.ack, b.last, b.inflight)
-    b.Rebuild(s)
     b.sent = false
     b.inflight = 0
 }
@@ -600,6 +591,8 @@ type Message struct {
     blkid int
     seq0 int
     data []byte
+    // meta
+    ack bool
 }
 
 const MSG_DATA	int = 0x44 // Data
