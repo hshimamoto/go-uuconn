@@ -127,7 +127,8 @@ func (b *Blob)Ack(s *Stream, ack int, sacks []int) {
     b.ack = ack
     b.sacks = sacks
     for _, msg := range b.msgs {
-	if msg.seq0 == ack {
+	seq1 := (msg.seq0 + len(msg.data)) % SEQMAX
+	if seq1 == ack {
 	    msg.ack = true
 	    continue
 	}
@@ -331,6 +332,10 @@ func (s *Stream)Runner(queue chan<- []byte) {
 			    if m.blkid != ackblkid {
 				continue
 			    }
+			    diff := (SEQMAX + m.seq0 - ackseq) % SEQMAX
+			    if diff >= (SEQMAX/2) {
+				continue
+			    }
 			    mseq1 := (m.seq0 + len(m.data)) % SEQMAX
 			    if m.seq0 == dlseq {
 				if ackseq != mseq1 {
@@ -349,18 +354,21 @@ func (s *Stream)Runner(queue chan<- []byte) {
 			pool = pool2
 		    }
 		} else {
-		    // pool it
-		    hit := false
-		    for _, m := range pool {
-			if m.seq0 == msg.seq0 {
-			    hit = true
-			    break
+		    diff := (SEQMAX + msg.seq0 - ackseq) % SEQMAX
+		    if diff < (SEQMAX/2) {
+			// pool it
+			hit := false
+			for _, m := range pool {
+			    if m.seq0 == msg.seq0 {
+				hit = true
+				break
+			    }
 			}
-		    }
-		    if !hit {
-			if len(pool) < 100 {
-			    pool = append(pool, msg)
-			    s.Tracef("pool %d\n", msg.seq0)
+			if !hit {
+			    if len(pool) < 100 {
+				pool = append(pool, msg)
+				s.Tracef("pool %d\n", msg.seq0)
+			    }
 			}
 		    }
 		}
