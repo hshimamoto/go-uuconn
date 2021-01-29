@@ -318,8 +318,12 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    s.established = true
 	    switch msg.mtype {
 	    case MSG_DATA:
+		doack := false
 		seq1 := (msg.seq0 + len(msg.data)) % SEQMAX
 		s.Tracef("MSG: Data seq %d-%d [%d]\n", msg.seq0, seq1, msg.data[0])
+		if seq1 == ackseq {
+		    doack = true
+		}
 		if msg.seq0 == dlseq {
 		    if ackseq != seq1 {
 			s.Tracef("Change ackseq %d to %d\n", ackseq, seq1)
@@ -361,6 +365,7 @@ func (s *Stream)Runner(queue chan<- []byte) {
 			}
 			pool = pool2
 		    }
+		    doack = true
 		} else {
 		    diff := (SEQMAX + msg.seq0 - ackseq) % SEQMAX
 		    if diff < (SEQMAX/2) {
@@ -376,13 +381,16 @@ func (s *Stream)Runner(queue chan<- []byte) {
 			    if len(pool) < 100 {
 				pool = append(pool, msg)
 				s.Tracef("pool %d\n", msg.seq0)
+				doack = true
 			    }
 			}
 		    }
 		}
-		if ackflag == false {
-		    ackq <-true
-		    ackflag = true
+		if doack {
+		    if ackflag == false {
+			ackq <-true
+			ackflag = true
+		    }
 		}
 	    case MSG_ACK:
 		s.Tracef("MSG: Ack seq %d %d\n", msg.seq0, len(msg.data))
