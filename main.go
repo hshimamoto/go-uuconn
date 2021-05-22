@@ -231,7 +231,8 @@ func (s *Stream)HandleData(msg *Message, ackblk, ackseq int) (int, int, bool) {
     s.Tracef("MSG: Data blk %d seq %d-%d [%d]\n", blk, seq0, seq1, msg.data[0])
     if seq0 != ackseq {
 	diff := (SEQMAX + seq0 - ackseq) % SEQMAX
-	return ackblk, ackseq, diff < (SEQMAX / 2)
+	pooling := (ackblk == blk) && (diff < (SEQMAX / 2))
+	return ackblk, ackseq, pooling
     }
     s.recvq <- msg.data
     s.Tracef("recvq: enqueue %d bytes %d\n", msglen, s.recvq_enq)
