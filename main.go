@@ -234,7 +234,6 @@ func (s *Stream)Runner(queue chan<- []byte) {
     ackseq := 0
     ackblkid := 0
     ackflag := false
-    dlseq := 0
     dupack := 0
     fastrewindack := 0
     resend := time.Duration(100)
@@ -325,14 +324,10 @@ func (s *Stream)Runner(queue chan<- []byte) {
 		if seq1 == ackseq {
 		    doack = true
 		}
-		if msg.seq0 == dlseq {
-		    if ackseq != seq1 {
-			s.Tracef("Change ackseq %d to %d\n", ackseq, seq1)
-		    }
+		if msg.seq0 == ackseq {
 		    s.recvq <- msg.data
 		    s.Tracef("recvq: enqueue %d bytes %d\n", len(msg.data), s.recvq_enq)
 		    s.recvq_enq += len(msg.data)
-		    dlseq = seq1
 		    ackseq = seq1
 		    ackblkid = msg.blkid
 		    // check pool
@@ -350,14 +345,10 @@ func (s *Stream)Runner(queue chan<- []byte) {
 				continue
 			    }
 			    mseq1 := (m.seq0 + len(m.data)) % SEQMAX
-			    if m.seq0 == dlseq {
-				if ackseq != mseq1 {
-				    s.Tracef("Change ackseq %d to %d [pool]\n", ackseq, mseq1)
-				}
+			    if m.seq0 == ackseq {
 				s.recvq <- m.data
 				s.Tracef("recvq: enqueue %d bytes %d\n", len(m.data), s.recvq_enq)
 				s.recvq_enq += len(m.data)
-				dlseq = mseq1
 				ackseq = mseq1
 				retry = true
 				continue
