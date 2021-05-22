@@ -219,6 +219,28 @@ func (s *Stream)Logf(fmt string, a ...interface{}) {
     log.Infof("[%d] " + fmt, args...)
 }
 
+func (s *Stream)HandleData(msg *Message, ackblk, ackseq int) (int, int, bool) {
+    if msg.mtype != MSG_DATA {
+	// bad message
+	return ackblk, ackseq, false
+    }
+    msglen := len(msg.data)
+    blk := msg.blkid
+    seq0 := msg.seq0
+    seq1 := (seq0 + msglen) % SEQMAX
+    s.Tracef("MSG: Data blk %d seq %d-%d [%d]\n", blk, seq0, seq1, msg.data[0])
+    if seq0 != ackseq {
+	diff := (SEQMAX + seq0 - ackseq) % SEQMAX
+	return ackblk, ackseq, diff < (SEQMAX / 2)
+    }
+    s.recvq <- msg.data
+    s.Tracef("recvq: enqueue %d bytes %d\n", msglen, s.recvq_enq)
+    s.recvq_enq += msglen
+    ackseq = seq1
+    ackblk = blk
+    return ackblk, ackseq, false
+}
+
 func (s *Stream)Runner(queue chan<- []byte) {
     // uplink buffer blob
     var b, pending *Blob
@@ -319,62 +341,48 @@ func (s *Stream)Runner(queue chan<- []byte) {
 	    switch msg.mtype {
 	    case MSG_DATA:
 		doack := false
-		seq1 := (msg.seq0 + len(msg.data)) % SEQMAX
-		s.Tracef("MSG: Data seq %d-%d [%d]\n", msg.seq0, seq1, msg.data[0])
+		nblkid, nseq, pooling := s.HandleData(msg, ackblkid, ackseq)
+		// TODO dupack for fast retransmit
+		/*
 		if seq1 == ackseq {
 		    doack = true
 		}
-		if msg.seq0 == ackseq {
-		    s.recvq <- msg.data
-		    s.Tracef("recvq: enqueue %d bytes %d\n", len(msg.data), s.recvq_enq)
-		    s.recvq_enq += len(msg.data)
-		    ackseq = seq1
-		    ackblkid = msg.blkid
+		*/
+		if nseq != ackseq {
+		    ackseq = nseq
+		    ackblkid = nblkid
+		    doack = true
 		    // check pool
 		    retry := len(pool) > 0
 		    for retry {
 			retry = false
 			pool2 := []*Message{}
-			s.Tracef("check pool %d\n", len(pool))
+			s.Tracef("check pool (len=%d)\n", len(pool))
 			for _, m := range pool {
-			    if m.blkid != ackblkid {
-				continue
-			    }
-			    diff := (SEQMAX + m.seq0 - ackseq) % SEQMAX
-			    if diff >= (SEQMAX/2) {
-				continue
-			    }
-			    mseq1 := (m.seq0 + len(m.data)) % SEQMAX
-			    if m.seq0 == ackseq {
-				s.recvq <- m.data
-				s.Tracef("recvq: enqueue %d bytes %d\n", len(m.data), s.recvq_enq)
-				s.recvq_enq += len(m.data)
-				ackseq = mseq1
+			    _, nseq, pooling := s.HandleData(m, ackblkid, ackseq)
+			    if nseq != ackseq {
+				ackseq = nseq
 				retry = true
+			    } else if pooling {
+				pool2 = append(pool2, m)
 				continue
 			    }
-			    pool2 = append(pool2, m)
 			}
 			pool = pool2
 		    }
-		    doack = true
-		} else {
-		    diff := (SEQMAX + msg.seq0 - ackseq) % SEQMAX
-		    if diff < (SEQMAX/2) {
-			// pool it
-			hit := false
-			for _, m := range pool {
-			    if m.seq0 == msg.seq0 {
-				hit = true
-				break
-			    }
+		} else if pooling {
+		    hit := false
+		    for _, m := range pool {
+			if m.seq0 == msg.seq0 {
+			    hit = true
+			    break
 			}
-			if !hit {
-			    if len(pool) < 100 {
-				pool = append(pool, msg)
-				s.Tracef("pool %d\n", msg.seq0)
-				doack = true
-			    }
+		    }
+		    if !hit {
+			if len(pool) < 100 {
+			    pool = append(pool, msg)
+			    s.Tracef("pool %d\n", msg.seq0)
+			    doack = true
 			}
 		    }
 		}
